@@ -70,6 +70,20 @@ function NewTabMenu() {
   );
 }
 
+function MurmeliGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-3.5" fill="currentColor" aria-hidden>
+      {/* burrow mound */}
+      <rect x="3" y="17.5" width="18" height="4.5" rx="2.25" />
+      {/* body + head + ears */}
+      <circle cx="9.3" cy="4.9" r="1.7" />
+      <circle cx="14.7" cy="4.9" r="1.7" />
+      <circle cx="12" cy="8" r="3.9" />
+      <path d="M12 7c-3 0-5 2-6.2 4.8-.9 2.1-1.1 3.9-1.1 5.7h14.6c0-1.8-.2-3.6-1.1-5.7C17 9 15 7 12 7Z" />
+    </svg>
+  );
+}
+
 export function Toolbar() {
   const theme = useUiStore((s) => s.theme);
   const sessionManagerOpen = useUiStore((s) => s.sessionManagerOpen);
@@ -84,10 +98,10 @@ export function Toolbar() {
 
   return (
     <header className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2">
-      {/* Logo placeholder */}
+      {/* Brand mark */}
       <div className="mr-1 flex items-center gap-2">
         <div className="flex size-5 items-center justify-center rounded bg-primary text-primary-foreground">
-          <Cable className="size-3.5" />
+          <MurmeliGlyph />
         </div>
         <span className="text-sm font-semibold tracking-tight">Murmeli</span>
       </div>

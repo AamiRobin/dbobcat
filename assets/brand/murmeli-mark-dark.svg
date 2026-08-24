@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="murmeli-title-dark">
+  <title id="murmeli-title-dark">Murmeli mark, tile-free variant for dark surfaces</title>
+
+  <!-- Burrow mound as database cylinder -->
+  <path d="M14 78v19a19 19 0 0 0 19 19h62a19 19 0 0 0 19-19V78Z" fill="#3B434F"/>
+  <ellipse cx="64" cy="78" rx="50" ry="14" fill="#3B434F"/>
+
+  <!-- Glacier seam arcs -->
+  <path d="M16.4 90A47.6 12.5 0 0 0 111.6 90" fill="none" stroke="#57A8C4" stroke-width="6" stroke-linecap="round"/>
+  <path d="M22 100A42 10.5 0 0 0 106 100" fill="none" stroke="#57A8C4" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Ears, behind head -->
+  <circle cx="46.5" cy="25" r="9" fill="#99A2B1"/>
+  <circle cx="81.5" cy="25" r="9" fill="#99A2B1"/>
+
+  <!-- Body: sentinel bell -->
+  <path d="M64 44c-13 0-23 9-28.5 23-4 10.5-6.5 20-6.5 27h70c0-7-2.5-16.5-6.5-27C87 53 77 44 64 44Z" fill="#99A2B1"/>
+
+  <!-- Head -->
+  <circle cx="64" cy="42" r="22" fill="#99A2B1"/>
+
+  <!-- Edelweiss belly and blaze -->
+  <ellipse cx="64" cy="82" rx="11" ry="12" fill="#F1EFE7"/>
+  <ellipse cx="64" cy="51" rx="11" ry="9" fill="#F1EFE7"/>
+
+  <!-- Nose -->
+  <rect x="59" y="45" width="10" height="8" rx="4" fill="#22262E"/>
+
+  <!-- Eyes: glacier glint -->
+  <circle cx="54.5" cy="40" r="3.2" fill="#57A8C4"/>
+  <circle cx="73.5" cy="40" r="3.2" fill="#57A8C4"/>
+</svg>

@@ -1,4 +1,8 @@
-# Murmeli
+<p align="center">
+  <img src="assets/brand/murmeli-mark.svg" alt="Murmeli logo — a sentinel marmot atop its burrow, drawn as a database cylinder" height="120">
+</p>
+
+<h1 align="center">Murmeli</h1>
 
 Murmeli (Swiss-German for *marmot*) is an open-source, cross-platform database GUI client for MySQL/MariaDB, PostgreSQL, and SQLite — inspired by [HeidiSQL](https://www.heidisql.com/), built with a modern stack.
 
