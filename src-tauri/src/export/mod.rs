@@ -865,7 +865,7 @@ async fn run_dump_inner(
     let mut reporter = ProgressReporter::new(app, id, total_tables);
     let mut tables_seen = 0usize;
 
-    output.write_str(&sql_dump::dump_header("HeidiClone", env!("CARGO_PKG_VERSION")))?;
+    output.write_str(&sql_dump::dump_header("Murmeli", env!("CARGO_PKG_VERSION")))?;
     output.write_str(sql_dump::session_setup_sql(dialect))?;
 
     'outer: for (db, tables) in &plan {

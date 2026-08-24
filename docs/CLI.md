@@ -1,6 +1,6 @@
 # CLI flags & single-instance behavior
 
-HeidiClone can be launched straight into a session from the command line,
+Murmeli can be launched straight into a session from the command line,
 HeidiSQL-style. Flags work on the initial launch **and** when a second
 invocation hands its arguments to the already-running instance
 (single-instance handoff).
@@ -19,16 +19,16 @@ Flags may be combined (`--connect local --new-query`).
 
 ```sh
 # Connect to the saved session named "local"
-heidisql-clone --connect local
+murmeli --connect local
 
 # Connect by session id and open an empty query tab
-heidisql-clone --connect 7f3c... --new-query
+murmeli --connect 7f3c... --new-query
 
 # Just open a fresh query tab on whatever is connected (or nothing)
-heidisql-clone --new-query
+murmeli --new-query
 
 # Handoff: the running app receives these args instead of starting twice
-heidisql-clone -c production
+murmeli -c production
 ```
 
 ## Resolution rules

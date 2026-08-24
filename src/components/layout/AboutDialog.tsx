@@ -13,7 +13,7 @@ import { t } from "@/lib/i18n";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useUiStore } from "@/stores/ui";
 
-const REPO_URL = "https://github.com/amirobin/heidisql-clone";
+const REPO_URL = "https://github.com/amirobin/murmeli";
 
 /** About box: version from the build define, MIT note, HeidiSQL credits. */
 export function AboutDialog() {

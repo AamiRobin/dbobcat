@@ -16,7 +16,7 @@ import { EMPTY_QUERY_TAB, useQueryEditorStore } from "@/stores/query-editor";
 import { useTabsStore, type Tab } from "@/stores/tabs";
 import { log } from "@/stores/log";
 
-export const STORAGE_KEY = "heidisql.session.tabs.v1";
+export const STORAGE_KEY = "murmeli.session.tabs.v1";
 const SAVE_DEBOUNCE_MS = 500;
 
 /** Indirection so tests can stub storage (bun has no localStorage). */

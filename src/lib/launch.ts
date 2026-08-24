@@ -1,7 +1,7 @@
 /**
  * Launch-intent handling (Phase 8).
  *
- * A second process instance (`heidisql-clone --connect <session>` /
+ * A second process instance (`murmeli --connect <session>` /
  * `--new-query [session]`) parks its CLI intent in Rust managed state and
  * pings `app://launch-intent`. The frontend pulls it once at mount via
  * `app_take_launch_intent`, resolves the target session, connects, and

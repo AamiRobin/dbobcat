@@ -97,7 +97,7 @@ export default function App() {
     // One-time bootstrap (guarded against StrictMode double-mount).
     if (!bootstrapped) {
       bootstrapped = true;
-      log("info", `HeidiClone v${__APP_VERSION__} started.`);
+      log("info", `Murmeli v${__APP_VERSION__} started.`);
       void checkBackend();
       restoreTabs();
     }

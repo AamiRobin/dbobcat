@@ -37,7 +37,7 @@ interface UiState {
   setAboutOpen: (open: boolean) => void;
 }
 
-const THEME_KEY = "heidisql.theme";
+const THEME_KEY = "murmeli.theme";
 
 function loadInitialTheme(): Theme {
   try {

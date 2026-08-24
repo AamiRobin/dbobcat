@@ -17,7 +17,7 @@
 
 export const en = {
   // App shell
-  "app.name": "HeidiClone",
+  "app.name": "Murmeli",
 
   // Toolbar
   "toolbar.connect": "Connect",
@@ -190,7 +190,7 @@ export const en = {
     "Fixed bindings for now; the registry is designed for remapping later.",
 
   // About dialog
-  "about.title": "About HeidiClone",
+  "about.title": "About Murmeli",
   "about.tagline":
     "An open-source database GUI client for MySQL/MariaDB, PostgreSQL and SQLite.",
   "about.license": "Released under the MIT license.",

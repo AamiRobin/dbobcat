@@ -89,7 +89,7 @@ export function Toolbar() {
         <div className="flex size-5 items-center justify-center rounded bg-primary text-primary-foreground">
           <Cable className="size-3.5" />
         </div>
-        <span className="text-sm font-semibold tracking-tight">HeidiClone</span>
+        <span className="text-sm font-semibold tracking-tight">Murmeli</span>
       </div>
 
       <Separator orientation="vertical" className="mx-1 h-5!" />

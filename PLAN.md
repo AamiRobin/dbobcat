@@ -1,6 +1,6 @@
-# HeidSQL Alternative — Open-Source Database Client
+# Murmeli — Open-Source Database Client (formerly heidisql-clone)
 
-Working title: **heidisql-clone**
+Swiss-German for *marmot* — an alpine nod to HeidiSQL's heritage.
 
 ## 1. Vision
 

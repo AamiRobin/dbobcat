@@ -76,7 +76,7 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
         .text("menu-shortcuts", "Keyboard Shortcuts")
         .text("menu-check-updates", "Check for Updates…")
         .separator()
-        .text("menu-about", "About HeidiClone")
+        .text("menu-about", "About Murmeli")
         .build()?;
 
     let menu = MenuBuilder::new(app).items(&[&file, &edit, &view, &help]).build()?;

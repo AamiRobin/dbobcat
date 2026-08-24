@@ -48,7 +48,7 @@ const NONCE_LEN: usize = 12;
 /// Mirrors Tauri's `app_data_dir` layout via the `dirs` crate.
 pub fn default_store_dir() -> Result<PathBuf> {
     dirs::data_dir()
-        .map(|d| d.join("com.amirobin.heidisql-clone"))
+        .map(|d| d.join("app.murmeli.desktop"))
         .ok_or_else(|| AppError::Config("could not resolve app data directory".into()))
 }
 
@@ -298,7 +298,7 @@ mod tests {
     /// Unique temp file per test invocation so parallel tests don't clash.
     fn temp_store(tag: &str) -> CredentialStore {
         let dir = std::env::temp_dir().join(format!(
-            "heidicred-{}-{tag}",
+            "murmeli-cred-{}-{tag}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -334,7 +334,7 @@ mod tests {
     fn state_survives_reload() {
         let tag = "reload";
         let dir = std::env::temp_dir().join(format!(
-            "heidicred-{}-{tag}",
+            "murmeli-cred-{}-{tag}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -370,7 +370,7 @@ mod tests {
         // unreadable without — same file format, different KDF input.
         let tag = "mastermode";
         let dir = std::env::temp_dir().join(format!(
-            "heidicred-{}-{tag}",
+            "murmeli-cred-{}-{tag}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -393,7 +393,7 @@ mod tests {
     fn rejects_garbage_files() {
         let tag = "garbage";
         let dir = std::env::temp_dir().join(format!(
-            "heidicred-{}-{tag}",
+            "murmeli-cred-{}-{tag}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
