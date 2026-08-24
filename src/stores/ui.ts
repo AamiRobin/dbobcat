@@ -1,0 +1,91 @@
+import { create } from "zustand";
+
+import type { Lang } from "@/lib/i18n";
+import { setLang } from "@/lib/i18n";
+
+export type Theme = "dark" | "light";
+
+/** Snapshot of the active data grid or query run, shown in the status bar. */
+export interface DataStats {
+  rowsLoaded: number;
+  totalRowsEstimate: number | null;
+  elapsedMs: number | null;
+  /** True while a query/data fetch is in flight (status bar shows activity). */
+  running?: boolean;
+}
+
+interface UiState {
+  theme: Theme;
+  /** UI language (Phase 8 i18n groundwork; only "en" ships for now). */
+  lang: Lang;
+  logCollapsed: boolean;
+  /** Stats from the active data tab; null when none is showing data. */
+  dataStats: DataStats | null;
+  // Global dialogs, openable from toolbar / shortcuts / native menu.
+  sessionManagerOpen: boolean;
+  shortcutsOpen: boolean;
+  aboutOpen: boolean;
+  setLang: (lang: Lang) => void;
+  setTheme: (theme: Theme) => void;
+  toggleTheme: () => void;
+  setLogCollapsed: (collapsed: boolean) => void;
+  toggleLogCollapsed: () => void;
+  setDataStats: (stats: DataStats) => void;
+  clearDataStats: () => void;
+  setSessionManagerOpen: (open: boolean) => void;
+  setShortcutsOpen: (open: boolean) => void;
+  setAboutOpen: (open: boolean) => void;
+}
+
+const THEME_KEY = "heidisql.theme";
+
+function loadInitialTheme(): Theme {
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === "dark" || stored === "light") return stored;
+  } catch {
+    // storage unavailable — fall through to default
+  }
+  return "dark"; // dark mode by default on first launch
+}
+
+export function applyTheme(theme: Theme): void {
+  document.documentElement.classList.toggle("dark", theme === "dark");
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    // non-fatal
+  }
+}
+
+export const useUiStore = create<UiState>((set, get) => ({
+  theme: loadInitialTheme(),
+  lang: "en",
+  logCollapsed: false,
+  dataStats: null,
+  sessionManagerOpen: false,
+  shortcutsOpen: false,
+  aboutOpen: false,
+
+  setLang: (lang) => {
+    setLang(lang);
+    set({ lang });
+  },
+
+  setTheme: (theme) => {
+    applyTheme(theme);
+    set({ theme });
+  },
+
+  toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),
+
+  setLogCollapsed: (collapsed) => set({ logCollapsed: collapsed }),
+  toggleLogCollapsed: () => set((s) => ({ logCollapsed: !s.logCollapsed })),
+
+  setDataStats: (stats) => set({ dataStats: stats }),
+  clearDataStats: () => set({ dataStats: null }),
+
+  setSessionManagerOpen: (sessionManagerOpen) => set({ sessionManagerOpen }),
+  setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  setAboutOpen: (aboutOpen) => set({ aboutOpen }),
+}));

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "heidisql-clone",
+  "version": "0.1.0",
+  "identifier": "com.amirobin.heidisql-clone",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "HeidiClone",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 560
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage", "nsis", "msi", "dmg", "app"],
+    "publisher": "Amir Robin",
+    "copyright": "© 2026 Amir Robin — MIT licensed",
+    "category": "DeveloperTool",
+    "homepage": "https://github.com/amirobin/heidisql-clone",
+    "shortDescription": "Open-source database GUI client",
+    "longDescription": "HeidiClone is an open-source, cross-platform database GUI client for MySQL/MariaDB, PostgreSQL, and SQLite. It offers a session manager with SSH tunnels and encrypted password storage, a virtualized data grid with change posting, a SQL editor with schema-driven completion, a table designer with ALTER preview, export/import across many formats, and server administration tools.",
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      },
+      "deb": {
+        "depends": []
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

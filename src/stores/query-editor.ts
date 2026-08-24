@@ -1,0 +1,85 @@
+import { create } from "zustand";
+
+import type { QueryOutcome } from "@/types/ipc";
+import { useTabsStore } from "@/stores/tabs";
+
+/**
+ * Per-query-tab editor state, kept OUT of React so switching tabs (which
+ * unmounts the inactive tab's component tree) never loses SQL text or the
+ * last run's results. Keyed by tab id like `stores/changesets.ts`.
+ */
+
+export interface QueryTabState {
+  sql: string;
+  /** Outcomes of the last run; null until the first execution. */
+  outcomes: QueryOutcome[] | null;
+  /** True while a script is executing on this tab. */
+  running: boolean;
+  /** Frontend wall-clock duration of the last run (includes IPC overhead). */
+  totalMs: number | null;
+  /** Database context for schema autocompletion (no session USE is issued). */
+  db: string | null;
+  /** Increments on every completed run — used to reset result-tab focus. */
+  runNonce: number;
+  /** Heidi default: first error aborts the rest of the script. */
+  stopOnError: boolean;
+  /** The exact script text of the last run (for message summaries). */
+  executedSql: string | null;
+  /** Phase 9-B: right-hand helpers panel (columns/snippets/reference). */
+  helpersOpen: boolean;
+}
+
+export const EMPTY_QUERY_TAB: QueryTabState = {
+  sql: "",
+  outcomes: null,
+  running: false,
+  totalMs: null,
+  db: null,
+  runNonce: 0,
+  stopOnError: true,
+  executedSql: null,
+  helpersOpen: false,
+};
+
+interface QueryEditorState {
+  byTab: Record<string, QueryTabState>;
+  patch: (tabId: string, partial: Partial<QueryTabState>) => void;
+  stateFor: (tabId: string) => QueryTabState;
+  clearTab: (tabId: string) => void;
+}
+
+export const useQueryEditorStore = create<QueryEditorState>((set, get) => ({
+  byTab: {},
+
+  patch: (tabId, partial) =>
+    set((state) => ({
+      byTab: {
+        ...state.byTab,
+        [tabId]: {
+          ...(state.byTab[tabId] ?? EMPTY_QUERY_TAB),
+          ...partial,
+        },
+      },
+    })),
+
+  stateFor: (tabId) => get().byTab[tabId] ?? EMPTY_QUERY_TAB,
+
+  clearTab: (tabId) =>
+    set((state) => {
+      if (!(tabId in state.byTab)) return state;
+      const next = { ...state.byTab };
+      delete next[tabId];
+      return { byTab: next };
+    }),
+}));
+
+// Keep the store tidy: drop state for tabs once they are closed.
+useTabsStore.subscribe((next, prev) => {
+  if (next.tabs.length >= prev.tabs.length) return;
+  const ids = new Set(next.tabs.map((t) => t.id));
+  for (const id of Object.keys(useQueryEditorStore.getState().byTab)) {
+    if (!ids.has(id)) {
+      useQueryEditorStore.getState().clearTab(id);
+    }
+  }
+});
