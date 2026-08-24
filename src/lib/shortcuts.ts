@@ -28,6 +28,7 @@ import { ipc } from "@/lib/ipc";
 import { log } from "@/stores/log";
 import { useConnectionStore } from "@/stores/connection";
 import { useFindDialogStore } from "@/stores/find-dialog";
+import { usePaletteStore } from "@/stores/palette";
 import { useTabsStore } from "@/stores/tabs";
 import { useUiStore } from "@/stores/ui";
 import { notify } from "@/lib/toast";
@@ -64,7 +65,8 @@ export interface ShortcutDef {
    * for combos containing a modifier.
    */
   alwaysFire?: boolean;
-  handler: () => void;
+  /** May return a promise; the dispatcher tracks it instead of discarding. */
+  handler: () => Promise<void> | void;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,10 +150,14 @@ export function formatCombo(combo: string): string {
       .split("+")
       .map((p) => {
         switch (p.toLowerCase()) {
-          case "mod": return "⌘";
-          case "ctrl": return "⌃";
-          case "alt": return "⌥";
-          case "shift": return "⇧";
+          case "mod":
+            return "⌘";
+          case "ctrl":
+            return "⌃";
+          case "alt":
+            return "⌥";
+          case "shift":
+            return "⇧";
           default:
             return p.length === 1 ? p.toUpperCase() : capitalize(p);
         }
@@ -162,8 +168,10 @@ export function formatCombo(combo: string): string {
     .split("+")
     .map((p) => {
       switch (p.toLowerCase()) {
-        case "mod": return "Ctrl";
-        case "meta": return "Win";
+        case "mod":
+          return "Ctrl";
+        case "meta":
+          return "Win";
         default:
           return p.length === 1 ? p.toUpperCase() : capitalize(p);
       }
@@ -210,6 +218,12 @@ export async function dispatchAction(actionId: string): Promise<void> {
     case "session-manager.open":
       useUiStore.getState().setSessionManagerOpen(true);
       break;
+    case "palette.open":
+      usePaletteStore.getState().toggle("unified");
+      break;
+    case "palette.commands":
+      usePaletteStore.getState().toggle("commands");
+      break;
     case "tab.new-query":
       useTabsStore.getState().openTab("query");
       break;
@@ -229,7 +243,10 @@ export async function dispatchAction(actionId: string): Promise<void> {
       break;
     case "app.quit":
       await ipc("app_exit").catch((err) =>
-        log("error", `Quit failed: ${err instanceof Error ? err.message : String(err)}`),
+        log(
+          "error",
+          `Quit failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
       );
       break;
     case "find-text.open": {
@@ -349,11 +366,33 @@ function isEditable(target: EventTarget | null): boolean {
 export const SHORTCUTS: ShortcutDef[] = [
   // -- global ---------------------------------------------------------------
   {
+    id: "shortcut.palette.open",
+    combos: ["Mod+K"],
+    label: "Open command palette",
+    group: "Global",
+    fireInEditor: true,
+    handler: async () => {
+      await dispatchAction("palette.open");
+    },
+  },
+  {
+    id: "shortcut.palette.commands",
+    combos: ["Mod+Shift+P"],
+    label: "Open command palette (commands)",
+    group: "Global",
+    fireInEditor: true,
+    handler: async () => {
+      await dispatchAction("palette.commands");
+    },
+  },
+  {
     id: "shortcut.session-manager",
     combos: ["Mod+O"],
     label: "Open session manager",
     group: "Global",
-    handler: () => void dispatchAction("session-manager.open"),
+    handler: async () => {
+      await dispatchAction("session-manager.open");
+    },
   },
   {
     id: "shortcut.tab.new-query",
@@ -361,7 +400,9 @@ export const SHORTCUTS: ShortcutDef[] = [
     label: "New query tab",
     group: "Global",
     fireInEditor: true,
-    handler: () => void dispatchAction("tab.new-query"),
+    handler: async () => {
+      await dispatchAction("tab.new-query");
+    },
   },
   {
     id: "shortcut.tab.close",
@@ -369,7 +410,9 @@ export const SHORTCUTS: ShortcutDef[] = [
     label: "Close active tab",
     group: "Global",
     fireInEditor: true,
-    handler: () => void dispatchAction("tab.close-active"),
+    handler: async () => {
+      await dispatchAction("tab.close-active");
+    },
   },
   {
     id: "shortcut.tab.next",
@@ -377,7 +420,9 @@ export const SHORTCUTS: ShortcutDef[] = [
     label: "Next tab",
     group: "Global",
     fireInEditor: true,
-    handler: () => void dispatchAction("tab.next"),
+    handler: async () => {
+      await dispatchAction("tab.next");
+    },
   },
   {
     id: "shortcut.tab.previous",
@@ -385,7 +430,9 @@ export const SHORTCUTS: ShortcutDef[] = [
     label: "Previous tab",
     group: "Global",
     fireInEditor: true,
-    handler: () => void dispatchAction("tab.previous"),
+    handler: async () => {
+      await dispatchAction("tab.previous");
+    },
   },
   {
     id: "shortcut.tree.refresh",
@@ -393,7 +440,9 @@ export const SHORTCUTS: ShortcutDef[] = [
     label: "Refresh database tree",
     group: "Global",
     fireInEditor: true,
-    handler: () => void dispatchAction("tree.refresh"),
+    handler: async () => {
+      await dispatchAction("tree.refresh");
+    },
   },
   {
     id: "shortcut.find-text",
@@ -401,8 +450,11 @@ export const SHORTCUTS: ShortcutDef[] = [
     label: "Find text on server",
     group: "Global",
     fireInEditor: true,
-    when: (ctx) => ctx.connected && ctx.connId !== null && ctx.dialect !== "sqlite",
-    handler: () => void dispatchAction("find-text.open"),
+    when: (ctx) =>
+      ctx.connected && ctx.connId !== null && ctx.dialect !== "sqlite",
+    handler: async () => {
+      await dispatchAction("find-text.open");
+    },
   },
   {
     id: "shortcut.app.quit",
@@ -410,7 +462,9 @@ export const SHORTCUTS: ShortcutDef[] = [
     label: "Quit",
     group: "Global",
     fireInEditor: true,
-    handler: () => void dispatchAction("app.quit"),
+    handler: async () => {
+      await dispatchAction("app.quit");
+    },
   },
 
   // -- query --------------------------------------------------------------
@@ -419,21 +473,27 @@ export const SHORTCUTS: ShortcutDef[] = [
     combos: ["F9"],
     label: "Run script",
     group: "Query",
-    handler: () => void dispatchAction("query.run-all"),
+    handler: async () => {
+      await dispatchAction("query.run-all");
+    },
   },
   {
     id: "shortcut.query.run-all-f5",
     combos: ["F5"],
     label: "Run script (alternate)",
     group: "Query",
-    handler: () => void dispatchAction("query.run-all"),
+    handler: async () => {
+      await dispatchAction("query.run-all");
+    },
   },
   {
     id: "shortcut.query.run-selection",
     combos: ["Mod+Enter"],
     label: "Run selection (or whole script)",
     group: "Query",
-    handler: () => void dispatchAction("query.run-selection"),
+    handler: async () => {
+      await dispatchAction("query.run-selection");
+    },
   },
 
   // -- help -----------------------------------------------------------------
@@ -442,7 +502,9 @@ export const SHORTCUTS: ShortcutDef[] = [
     combos: ["Mod+/", "Mod+?", "?"],
     label: "Show keyboard shortcuts",
     group: "Dialogs",
-    handler: () => void dispatchAction("help.shortcuts"),
+    handler: async () => {
+      await dispatchAction("help.shortcuts");
+    },
   },
 ];
 
@@ -472,8 +534,19 @@ export function installShortcutListener(): () => void {
     }
     if (!def || !matchedCombo) return;
 
+    // While the command palette is open it owns the keyboard: every def
+    // except its own stands down (Mod+R / Mod+T / … must not fire under
+    // the dialog). The palette defs keep firing so Mod+K can toggle shut.
+    if (
+      usePaletteStore.getState().open &&
+      !def.id.startsWith("shortcut.palette.")
+    ) {
+      return;
+    }
+
     const target = e.target;
-    const inCodeMirror = target instanceof HTMLElement && !!target.closest(".cm-editor");
+    const inCodeMirror =
+      target instanceof HTMLElement && !!target.closest(".cm-editor");
 
     // Inside CodeMirror the editor keymap owns F9/F5/Mod+Enter — stand down.
     if (inCodeMirror && !def.fireInEditor) return;
@@ -490,11 +563,15 @@ export function installShortcutListener(): () => void {
     // Ctrl+Q/W/O have browser meanings too) and keep other listeners out.
     e.preventDefault();
     e.stopPropagation();
-    def.handler();
+    void Promise.resolve(def.handler()).catch((err) => {
+      // A rejecting handler must not surface as an unhandled rejection.
+      log("error", err instanceof Error ? err.message : String(err));
+    });
   };
 
   window.addEventListener("keydown", onKeyDown, { capture: true });
-  return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  return () =>
+    window.removeEventListener("keydown", onKeyDown, { capture: true });
 }
 
 /**

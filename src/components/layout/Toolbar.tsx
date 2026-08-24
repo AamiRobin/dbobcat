@@ -7,6 +7,7 @@ import {
   Moon,
   Plus,
   RefreshCw,
+  Search,
   TextSearch,
   SlidersHorizontal,
   Sun,
@@ -26,7 +27,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { t } from "@/lib/i18n";
-import { dispatchAction } from "@/lib/shortcuts";
+import { dispatchAction, formatCombo } from "@/lib/shortcuts";
 import { openImportWizard } from "@/stores/import-dialog";
 import { openFindTextDialog } from "@/stores/find-dialog";
 import { useConnectionStore } from "@/stores/connection";
@@ -222,6 +223,22 @@ export function Toolbar() {
       )}
 
       <div className="ml-auto flex items-center">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t("toolbar.palette")}
+              onClick={() => void dispatchAction("palette.open")}
+            >
+              <Search data-icon="inline-start" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {t("toolbar.palette")} ({formatCombo("Mod+K")})
+          </TooltipContent>
+        </Tooltip>
+
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

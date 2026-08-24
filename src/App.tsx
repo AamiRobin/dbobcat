@@ -32,6 +32,9 @@ const ImportWizard = lazy(() =>
 const FindTextDialog = lazy(() =>
   import("@/components/server/FindTextDialog").then((m) => ({ default: m.FindTextDialog })),
 );
+const CommandPalette = lazy(() =>
+  import("@/components/palette/CommandPalette").then((m) => ({ default: m.CommandPalette })),
+);
 
 function EditorArea() {
   const tabs = useTabsStore((s) => s.tabs);
@@ -132,6 +135,7 @@ export default function App() {
           <ExportDialog />
           <ImportWizard />
           <FindTextDialog />
+          <CommandPalette />
         </Suspense>
         <ShortcutsDialog />
         <AboutDialog />
