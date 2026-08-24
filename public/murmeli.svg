@@ -1,14 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 128 128">
   <rect width="128" height="128" rx="28" fill="#22262E"/>
-  <path d="M14 78v19a19 19 0 0 0 19 19h62a19 19 0 0 0 19-19V78Z" fill="#3B434F"/>
-  <ellipse cx="64" cy="78" rx="50" ry="14" fill="#3B434F"/>
-  <circle cx="46.5" cy="25" r="9" fill="#99A2B1"/>
-  <circle cx="81.5" cy="25" r="9" fill="#99A2B1"/>
+  <defs>
+    <clipPath id="murmeli-mound-clip-favicon">
+      <path d="M14 78v24a50 14 0 0 0 100 0V78Z"/>
+    </clipPath>
+  </defs>
+  <path d="M14 78v24a50 14 0 0 0 100 0V78Z" fill="#4A5462"/>
+  <ellipse cx="64" cy="78" rx="50" ry="14" fill="#5A6475"/>
+  <g fill="none" stroke="#57A8C4" stroke-width="6" clip-path="url(#murmeli-mound-clip-favicon)">
+    <path d="M14 85a50 14 0 0 0 100 0"/>
+    <path d="M14 95a50 14 0 0 0 100 0"/>
+  </g>
+  <circle cx="44.5" cy="30.5" r="5" fill="#99A2B1"/>
+  <circle cx="83.5" cy="30.5" r="5" fill="#99A2B1"/>
   <path d="M64 44c-13 0-23 9-28.5 23-4 10.5-6.5 20-6.5 27h70c0-7-2.5-16.5-6.5-27C87 53 77 44 64 44Z" fill="#99A2B1"/>
   <circle cx="64" cy="42" r="22" fill="#99A2B1"/>
   <ellipse cx="64" cy="82" rx="11" ry="12" fill="#F1EFE7"/>
-  <ellipse cx="64" cy="51" rx="11" ry="9" fill="#F1EFE7"/>
-  <rect x="59" y="45" width="10" height="8" rx="4" fill="#22262E"/>
-  <circle cx="54.5" cy="40" r="3.2" fill="#57A8C4"/>
-  <circle cx="73.5" cy="40" r="3.2" fill="#57A8C4"/>
+  <ellipse cx="64" cy="50.5" rx="13" ry="6.5" fill="#F1EFE7"/>
+  <rect x="59" y="46.5" width="10" height="8" rx="4" fill="#22262E"/>
+  <circle cx="54.5" cy="40" r="3.6" fill="#57A8C4"/>
+  <circle cx="73.5" cy="40" r="3.6" fill="#57A8C4"/>
 </svg>

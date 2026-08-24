@@ -76,8 +76,8 @@ function MurmeliGlyph() {
       {/* burrow mound */}
       <rect x="3" y="17.5" width="18" height="4.5" rx="2.25" />
       {/* body + head + ears */}
-      <circle cx="9.3" cy="4.9" r="1.7" />
-      <circle cx="14.7" cy="4.9" r="1.7" />
+      <circle cx="8.4" cy="5.9" r="1.3" />
+      <circle cx="15.6" cy="5.9" r="1.3" />
       <circle cx="12" cy="8" r="3.9" />
       <path d="M12 7c-3 0-5 2-6.2 4.8-.9 2.1-1.1 3.9-1.1 5.7h14.6c0-1.8-.2-3.6-1.1-5.7C17 9 15 7 12 7Z" />
     </svg>
