@@ -31,6 +31,7 @@ import { useFindDialogStore } from "@/stores/find-dialog";
 import { usePaletteStore } from "@/stores/palette";
 import { useTabsStore } from "@/stores/tabs";
 import { useUiStore } from "@/stores/ui";
+import { shouldAskOnQuit, useTransactionStore } from "@/stores/transaction";
 import { notify } from "@/lib/toast";
 
 // ---------------------------------------------------------------------------
@@ -241,7 +242,13 @@ export async function dispatchAction(actionId: string): Promise<void> {
     case "tree.refresh":
       await refreshTree();
       break;
-    case "app.quit":
+    case "app.quit": {
+      // Transactions Phase 1: resolve an open transaction before quitting.
+      const tx = useTransactionStore.getState().tx;
+      if (shouldAskOnQuit(tx)) {
+        useTransactionStore.getState().requestAsk("quit");
+        break;
+      }
       await ipc("app_exit").catch((err) =>
         log(
           "error",
@@ -249,6 +256,7 @@ export async function dispatchAction(actionId: string): Promise<void> {
         ),
       );
       break;
+    }
     case "find-text.open": {
       const connId = useConnectionStore.getState().connId;
       if (connId !== null) useFindDialogStore.getState().open({ connId });

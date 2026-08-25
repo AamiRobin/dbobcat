@@ -18,6 +18,11 @@ import { dispatchAction, useShortcuts } from "@/lib/shortcuts";
 import { installTabPersistence, restoreTabs } from "@/lib/tab-restore";
 import { installConnStatusListener } from "@/stores/connection";
 import { log } from "@/stores/log";
+import {
+  installTxStatusListener,
+  shouldAskOnQuit,
+  useTransactionStore,
+} from "@/stores/transaction";
 import { useTabsStore } from "@/stores/tabs";
 
 // Heavy global dialogs load on demand (Phase 8 bundle hygiene); their open
@@ -34,6 +39,9 @@ const FindTextDialog = lazy(() =>
 );
 const CommandPalette = lazy(() =>
   import("@/components/palette/CommandPalette").then((m) => ({ default: m.CommandPalette })),
+);
+const TxAskDialog = lazy(() =>
+  import("@/components/common/TxAskDialog").then((m) => ({ default: m.TxAskDialog })),
 );
 
 function EditorArea() {
@@ -109,6 +117,23 @@ export default function App() {
     const uninstallPersist = installTabPersistence();
     const stopLaunchIntents = consumeLaunchIntent();
     const stopConnStatus = installConnStatusListener();
+    const stopTxStatus = installTxStatusListener();
+    // Window-close gate (Transactions Phase 1): an open transaction must be
+    // resolved before the webview goes away. `onCloseRequested` listens via
+    // core:event, covered by the `core:default` capability.
+    let unlistenClose: (() => void) | null = null;
+    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
+      getCurrentWindow()
+        .onCloseRequested((event) => {
+          if (shouldAskOnQuit(useTransactionStore.getState().tx)) {
+            event.preventDefault();
+            useTransactionStore.getState().requestAsk("window-close");
+          }
+        })
+        .then((fn) => {
+          unlistenClose = fn;
+        }),
+    );
     // Native menu clicks share the shortcut action map.
     const unlistenMenu = onBackendEvent<string>("menu://click", (id) => {
       const action = MENU_ACTIONS[id];
@@ -118,6 +143,8 @@ export default function App() {
       uninstallPersist();
       stopLaunchIntents();
       void stopConnStatus.then((fn) => fn());
+      void stopTxStatus.then((fn) => fn());
+      unlistenClose?.();
       void unlistenMenu.then((fn) => fn());
     };
   }, []);
@@ -136,6 +163,7 @@ export default function App() {
           <ImportWizard />
           <FindTextDialog />
           <CommandPalette />
+          <TxAskDialog />
         </Suspense>
         <ShortcutsDialog />
         <AboutDialog />

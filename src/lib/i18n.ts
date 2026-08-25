@@ -73,6 +73,18 @@ export const en = {
   "tx.toast.committed": "Transaction committed — {count} statement(s) cleared.",
   "tx.toast.rolledBack": "Transaction rolled back — {count} statement(s) cleared.",
   "tx.log.rollbackByDisconnect": "Open transaction was rolled back by disconnect.",
+  "tx.dialog.title": "Open transaction",
+  "tx.dialog.body":
+    "A transaction is open with {count} tracked statement(s). It will be rolled back by the server unless you commit it before {action}.",
+  "tx.dialog.action.disconnect": "disconnecting",
+  "tx.dialog.action.quit": "quitting",
+  "tx.dialog.action.windowClose": "closing the window",
+  "tx.dialog.commit": "Commit & proceed",
+  "tx.dialog.rollback": "Roll back & proceed",
+  "tx.ddlWarning.title": "Statement will commit the transaction",
+  "tx.ddlWarning.body":
+    "{count} statement(s) in this script are DDL that makes MySQL implicitly commit the open transaction first.",
+  "tx.ddlWarning.confirm": "Run anyway",
 
   // Center panel empty states
   "empty.noTabs.title": "No tabs open",

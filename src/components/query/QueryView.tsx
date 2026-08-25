@@ -18,8 +18,10 @@ import { QueryHelpersPanel } from "@/components/query/QueryHelpersPanel";
 import { QueryHistoryMenu } from "@/components/query/QueryHistoryMenu";
 import { QueryResults } from "@/components/query/QueryResults";
 import { dialectToFormatterLanguage } from "@/components/common/SqlCodeEditor";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { SqlEditor, type RunRequestKind } from "@/components/query/SqlEditor";
 import { setActiveQueryRunner } from "@/lib/shortcuts";
+import { hasImplicitCommitDdl } from "@/lib/tx-classify";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -43,6 +45,7 @@ import { t } from "@/lib/i18n";
 import { openExportDialog } from "@/stores/export-dialog";
 import { log } from "@/stores/log";
 import { useConnectionStore } from "@/stores/connection";
+import { useTransactionStore } from "@/stores/transaction";
 import {
   EMPTY_QUERY_TAB,
   useQueryEditorStore,
@@ -83,6 +86,8 @@ export function QueryView({ tab }: { tab: Tab }) {
 
   const [formatError, setFormatError] = useState<string | null>(null);
   const [activeResultSet, setActiveResultSet] = useState<number | null>(null);
+  /** Script awaiting the "DDL will commit the transaction" confirmation. */
+  const [ddlConfirmSql, setDdlConfirmSql] = useState<string | null>(null);
   const viewRef = useRef<EditorView | null>(null);
 
   const running = qState.running;
@@ -149,17 +154,15 @@ export function QueryView({ tab }: { tab: Tab }) {
   }, [tableNames, eagerColumns.data]);
 
   // -- execution ------------------------------------------------------------
-  const executeSql = async (sqlText: string) => {
-    const trimmed = sqlText.trim();
-    if (!trimmed || connId === null || running) return;
-
+  /** Actual script runner, after all pre-flight gates passed. */
+  const runExecution = async (trimmed: string) => {
     patch(tabId, { running: true, executedSql: trimmed });
     setDataStats({ rowsLoaded: 0, totalRowsEstimate: null, elapsedMs: null, running: true });
     const started = performance.now();
 
     try {
       const stopOnError = useQueryEditorStore.getState().stateFor(tabId).stopOnError;
-      const outcomes = await runScript(connId, trimmed, stopOnError, connName);
+      const outcomes = await runScript(connId!, trimmed, stopOnError, connName);
       const totalMs = Math.round(performance.now() - started);
 
       let errors = 0;
@@ -214,6 +217,28 @@ export function QueryView({ tab }: { tab: Tab }) {
       log("error", `Script could not be executed: ${message}`);
       setDataStats({ rowsLoaded: 0, totalRowsEstimate: null, elapsedMs: null });
     }
+  };
+
+  /** Gate + run: warns before MySQL DDL would implicitly commit the tx. */
+  const executeSql = async (sqlText: string) => {
+    const trimmed = sqlText.trim();
+    if (!trimmed || connId === null || running) return;
+
+    // Transactions Phase 1: running implicit-commit DDL inside an open
+    // manual transaction silently commits it — ask before sending.
+    if (
+      dialect === "mysql" &&
+      useTransactionStore.getState().tx?.phase === "open" &&
+      hasImplicitCommitDdl(
+        splitStatements(trimmed).map((s) => s.text),
+        "mysql",
+      )
+    ) {
+      setDdlConfirmSql(trimmed);
+      return;
+    }
+
+    await runExecution(trimmed);
   };
 
   // -- editor actions -------------------------------------------------------
@@ -336,6 +361,12 @@ export function QueryView({ tab }: { tab: Tab }) {
 
   // Clear the global status bar defaults when this tab unmounts.
   useEffect(() => () => clearOnUnmount.current(), []);
+
+  const ddlCommitCount = ddlConfirmSql
+    ? splitStatements(ddlConfirmSql).filter((s) =>
+        hasImplicitCommitDdl([s.text], "mysql"),
+      ).length
+    : 0;
 
   // -- render ---------------------------------------------------------------
   return (
@@ -523,6 +554,21 @@ export function QueryView({ tab }: { tab: Tab }) {
           )}
         </Group>
       </div>
+
+      {/* Transactions Phase 1: implicit-commit DDL warning */}
+      <ConfirmDialog
+        open={ddlConfirmSql !== null}
+        onOpenChange={(next) => !next && setDdlConfirmSql(null)}
+        title={t("tx.ddlWarning.title")}
+        description={t("tx.ddlWarning.body", { count: ddlCommitCount })}
+        confirmLabel={t("tx.ddlWarning.confirm")}
+        destructive
+        onConfirm={() => {
+          const sql = ddlConfirmSql;
+          setDdlConfirmSql(null);
+          if (sql) void runExecution(sql);
+        }}
+      />
     </div>
   );
 }
