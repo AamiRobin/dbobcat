@@ -1,0 +1,164 @@
+name: Release
+
+# Builds signed, updatable release bundles and publishes them to a GitHub
+# Release on the tag, including the Tauri v2 updater manifest `latest.json`
+# so the documented endpoint (`releases/latest/download/latest.json`) works.
+# The updater overlay (src-tauri/tauri.updater.conf.json) contains a
+# __TAURI_UPDATER_PUBLIC_KEY__ placeholder that this workflow substitutes
+# with the real public key before building, keeping local/dev builds
+# key-free.
+
+on:
+  push:
+    tags: ["v*"]
+
+# Least privilege by default; only the publishing job escalates to write.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Release bundles (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            # Updater platform key in latest.json (derived from the target triple).
+            platform: linux-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: darwin-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows-x86_64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Linux system dependencies (Tauri)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev patchelf
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Substitute updater public key
+        shell: bash
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TAURI_UPDATER_PUBLIC_KEY}" ]]; then
+            echo "::error::TAURI_UPDATER_PUBLIC_KEY secret is not set; refusing to build an updater config with a placeholder key."
+            exit 1
+          fi
+          if ! grep -q '__TAURI_UPDATER_PUBLIC_KEY__' src-tauri/tauri.updater.conf.json; then
+            echo "::error::Placeholder missing in src-tauri/tauri.updater.conf.json."
+            exit 1
+          fi
+          # '|' delimiter: base64 minisign keys may contain '/' but never '|'
+          sed -i "s|__TAURI_UPDATER_PUBLIC_KEY__|${TAURI_UPDATER_PUBLIC_KEY}|" src-tauri/tauri.updater.conf.json
+
+      # Signing key material is scoped to this step only — never echoed,
+      # never exported for the rest of the job.
+      - name: Build Tauri app with updater artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bun run tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json
+
+      # Emit this platform's slice of the Tauri v2 updater manifest. The
+      # merged file is assembled by the publish job.
+      - name: Generate updater metadata fragment
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
+          case "${{ matrix.platform }}" in
+            darwin-aarch64) pattern="$bundle/macos/*.app.tar.gz" ;;
+            linux-x86_64)   pattern="$bundle/appimage/*.AppImage" ;;
+            windows-x86_64) pattern="$bundle/nsis/*-setup.exe" ;;
+            *) echo "::error::No updater artifact mapping for ${{ matrix.platform }}."; exit 1 ;;
+          esac
+          archives=( $pattern )
+          if (( ${#archives[@]} != 1 )); then
+            echo "::error::Expected exactly one updater archive matching '$pattern', found ${#archives[@]}."
+            exit 1
+          fi
+          archive="${archives[0]}"
+          sig="${archive}.sig"
+          if [[ ! -f "$sig" ]]; then
+            echo "::error::Missing updater signature file '$sig' — was the build signed?"
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          pub_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          signature="$(tr -d '[:space:]' < "$sig")"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$archive")"
+          jq -n \
+            --arg version "$version" \
+            --arg pub_date "$pub_date" \
+            --arg platform "${{ matrix.platform }}" \
+            --arg signature "$signature" \
+            --arg url "$url" \
+            '{version: $version, pub_date: $pub_date,
+              platforms: {($platform): {signature: $signature, url: $url}}}' \
+            > "latest-${{ matrix.platform }}.json"
+          cat "latest-${{ matrix.platform }}.json"
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: murmeli-${{ matrix.os }}-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/**
+            latest-${{ matrix.platform }}.json
+
+  publish:
+    name: Publish release + latest.json
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all bundles and metadata fragments
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Merge updater fragments into latest.json
+        run: |
+          cd dist
+          jq -s 'reduce .[] as $fragment ({}; . * $fragment)' latest-*.json > latest.json
+          rm -f latest-*.json
+          cat latest.json
+
+      - name: Create GitHub release with all assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: dist/**

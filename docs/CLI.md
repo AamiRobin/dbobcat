@@ -47,15 +47,32 @@ unless the build was produced with signing/update configuration:
 
 - Local/dev builds: `Check for Updates…` (Help menu) reports that auto-update
   is unavailable — this is expected and logged, not an error dialog.
-- Release builds are bundled with:
+- Release builds are produced by the `Release` workflow
+  (`.github/workflows/release.yml`), triggered by pushing a `v*` tag. It:
 
-  ```sh
-  TAURI_SIGNING_PRIVATE_KEY=... TAURI_SIGNING_PRIVATE_KEY_PASSWORD=... \
-    bun run tauri build --config src-tauri/tauri.updater.conf.json
-  ```
+  1. installs the Tauri system dependencies (Linux) plus Bun and Rust,
+  2. substitutes `__TAURI_UPDATER_PUBLIC_KEY__` in
+     `src-tauri/tauri.updater.conf.json` with the `TAURI_UPDATER_PUBLIC_KEY`
+     repository secret, failing fast if the secret is unset,
+  3. runs `bun run tauri build --config src-tauri/tauri.updater.conf.json`
+     with the signing key material exported as environment variables
+     (scoped to that build step only),
+  4. generates a per-platform updater metadata fragment (`latest.json`
+     slice: version from the tag, signature contents, and the release
+     download URL of the platform's updater archive) for every matrix
+     target, uploading it alongside the bundles as workflow artifacts,
+     and — via a separate `publish` job with only that job granted
+     `contents: write` —
+  5. merges the fragments into one `latest.json` and publishes a GitHub
+     Release on the tag containing all installers, updater archives,
+     `.sig` files, and `latest.json`. The updater then resolves updates at
+     `releases/latest/download/latest.json`.
 
-  The overlay (`src-tauri/tauri.updater.conf.json`) enables
-  `bundle.createUpdaterArtifacts` and points the updater at the release
-  endpoint; CI substitutes `__TAURI_UPDATER_PUBLIC_KEY__` with the real
-  public key. This keeps local builds key-free while making release builds
-  updatable end-to-end.
+   Updater platform keys follow Tauri's naming, derived from what the
+   matrix actually builds: `darwin-aarch64` (macOS `.app.tar.gz`),
+   `linux-x86_64` (`.AppImage`), and `windows-x86_64` (NSIS `-setup.exe`).
+
+  Required secrets: `TAURI_UPDATER_PUBLIC_KEY` (minisign public key) and
+  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (exported
+  with `bunx tauri signer generate`). This keeps local builds key-free while
+  making release builds updatable end-to-end.
