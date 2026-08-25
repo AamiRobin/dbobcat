@@ -120,20 +120,22 @@ export default function App() {
     const stopTxStatus = installTxStatusListener();
     // Window-close gate (Transactions Phase 1): an open transaction must be
     // resolved before the webview goes away. `onCloseRequested` listens via
-    // core:event, covered by the `core:default` capability.
+    // core:event, covered by the `core:default` capability. Errors are
+    // swallowed like every other listener (e.g. running outside Tauri).
     let unlistenClose: (() => void) | null = null;
-    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
-      getCurrentWindow()
-        .onCloseRequested((event) => {
+    void import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) =>
+        getCurrentWindow().onCloseRequested((event) => {
           if (shouldAskOnQuit(useTransactionStore.getState().tx)) {
             event.preventDefault();
             useTransactionStore.getState().requestAsk("window-close");
           }
-        })
-        .then((fn) => {
-          unlistenClose = fn;
         }),
-    );
+      )
+      .then((fn) => {
+        unlistenClose = fn;
+      })
+      .catch(() => {});
     // Native menu clicks share the shortcut action map.
     const unlistenMenu = onBackendEvent<string>("menu://click", (id) => {
       const action = MENU_ACTIONS[id];
