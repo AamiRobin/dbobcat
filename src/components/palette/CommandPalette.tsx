@@ -9,8 +9,10 @@ import {
   FileCode,
   FileText,
   FileUp,
+  Hash,
   Info,
   Keyboard,
+  Key,
   PlugZap,
   RefreshCw,
   Server,
@@ -33,6 +35,7 @@ import { ipc } from "@/lib/ipc";
 import {
   TREE_STALE_TIME,
   dbKeys,
+  fetchColumns,
   fetchDatabases,
   fetchTables,
 } from "@/lib/db-queries";
@@ -52,16 +55,21 @@ import {
   snippet,
 } from "@/lib/query-queries";
 import {
+  applyScope,
   buildActionItems,
+  buildColumnItems,
   buildHistoryItems,
   buildObjectItems,
   buildRecentItems,
   buildSessionItems,
   parseMode,
+  parseScopedQuery,
+  selectDbModeItems,
   selectTop,
   sliceRecentHistory,
   type PaletteActionContext,
   type PaletteActionItem,
+  type PaletteColumnItem,
   type PaletteHistoryItem,
   type PaletteItem,
   type PaletteMode,
@@ -76,6 +84,7 @@ import { openQueryTabWithSql } from "@/stores/query-editor";
 import { openDataTable, openDesignerTab, openObjectEditorTab } from "@/stores/tabs";
 import { useUiStore } from "@/stores/ui";
 import type {
+  ColumnMeta,
   EventMeta,
   HistoryEntry,
   RoutineMeta,
@@ -86,24 +95,28 @@ import type {
 } from "@/types/ipc";
 
 /**
- * Command palette (palette Phase 2). Mounted once at the app root inside
+ * Command palette (palette Phase 3). Mounted once at the app root inside
  * Suspense; visibility lives in `usePaletteStore` so Mod+K / Mod+Shift+P
  * and the toolbar button share one entry path.
  *
  * Filtering is OURS (`shouldFilter={false}`): rows are ranked by
  * `selectTop` and grouped into fixed sections — Recents / Tables / Views /
- * Routines / Triggers / Events / Sessions / Commands / Query history.
- * Tab cycles unified → commands → sessions → history preserving the query
- * text; Shift+Enter triggers the alternate activation (table → designer,
- * view → data grid, history → copy SQL, session → manager preselected);
- * Backspace on an empty mode query exits back to unified.
+ * Routines / Triggers / Events / Columns / Sessions / Commands / Query
+ * history. Tab cycles unified → commands → sessions → history → db,
+ * preserving the query text; Shift+Enter triggers the alternate activation
+ * (table/column → designer, view → data grid, history → copy SQL, session
+ * → manager preselected); Backspace on an empty mode query exits back to
+ * unified.
  *
  * Object scope mirrors the DB tree: databases + table lists load first,
  * and once every table list has landed the second wave fans out for
  * routines/triggers/events through the SAME objKeys the lazy tree groups
  * use (staleTime ∞, so repeat opens after the tree loaded cost nothing).
- * Engine gating follows DbTree exactly: no routines on SQLite, no events
- * outside MySQL; triggers exist everywhere.
+ * The THIRD wave (Phase 3) fetches per-table columns — again through the
+ * tree's dbKeys — but stays disabled until the user actually types, since
+ * an empty query never lists columns; first paint never waits on the app's
+ * highest-volume IPC. Engine gating follows DbTree exactly: no routines on
+ * SQLite, no events outside MySQL; triggers exist everywhere.
  */
 
 /** Unified-mode QUERY HISTORY slice size (after recents/objects/sessions/actions). */
@@ -130,6 +143,7 @@ function prefixFor(mode: PaletteMode): string {
   if (mode === "commands") return "> ";
   if (mode === "sessions") return "@ ";
   if (mode === "history") return "# ";
+  if (mode === "db") return "db: ";
   return "";
 }
 
@@ -238,7 +252,6 @@ function PaletteBody({
 
   const sessionId = useConnectionStore((s) => s.session?.sessionId ?? null);
   const { recents, recordRecent } = usePaletteRecents(sessionId);
-
   // Object scope: databases + a fan-out of table lists per database,
   // through the SAME dbKeys the tree uses — staleTime is Infinity there, so
   // repeat opens after the tree has loaded cost nothing.
@@ -249,6 +262,17 @@ function PaletteBody({
     staleTime: TREE_STALE_TIME,
   });
   const dbs = useMemo(() => databasesQuery.data ?? [], [databasesQuery.data]);
+
+  // Dot-scoped unified queries ("shop.ord", "shop.users.email") — parsed
+  // against the KNOWN db list so unknown dbs fall back to plain matching.
+  const knownDbs = useMemo(() => dbs.map((d) => d.name), [dbs]);
+  const scope = useMemo(
+    () =>
+      parsed.mode === "unified"
+        ? parseScopedQuery(parsed.query, knownDbs)
+        : null,
+    [parsed.mode, parsed.query, knownDbs],
+  );
 
   const tablesQueries = useQueries({
     queries: dbs.map((d) => ({
@@ -324,6 +348,57 @@ function PaletteBody({
     return map;
   }, [dbs, eventQueries]);
 
+  // Third wave (Phase 3): per-table columns for column-level search. Pairs
+  // come ONLY from dbs whose table list already landed, and cover plain
+  // tables only — DbTree's view nodes have no column children. The wave
+  // stays disabled until the query is non-empty AND columns can actually
+  // contribute (empty-query listings never include them; scoped `db.obj`
+  // queries match objects only), so first paint and idle browsing never pay
+  // for the app's highest-volume IPC. The shared dbKeys cache + TREE_
+  // STALE_TIME keep repeat typing and tree-warmed tables free.
+  const wantsColumns =
+    parsed.mode === "db" ||
+    (parsed.mode === "unified" &&
+      parsed.query.trim() !== "" &&
+      (!scope || scope.kind === "columns"));
+
+  const columnPairs = useMemo(() => {
+    const pairs: { db: string; table: string }[] = [];
+    for (const d of dbs) {
+      const metas = tablesByDb[d.name];
+      if (!metas) continue; // tables wave still landing for this db
+      for (const m of metas) {
+        if (m.kind === "table") pairs.push({ db: d.name, table: m.name });
+      }
+    }
+    return pairs;
+  }, [dbs, tablesByDb]);
+
+  const columnsWaveReady =
+    connected &&
+    !databasesQuery.isPending &&
+    !tablesQueries.some((q) => q.isPending) &&
+    wantsColumns;
+
+  const columnsQueries = useQueries({
+    queries: columnPairs.map((p) => ({
+      queryKey: dbKeys.columns(connId as number, p.db, p.table),
+      queryFn: () => fetchColumns(connId as number, p.db, p.table),
+      enabled: open && columnsWaveReady,
+      staleTime: TREE_STALE_TIME,
+    })),
+  });
+
+  const columnsByDb = useMemo(() => {
+    const map: Record<string, Record<string, ColumnMeta[] | undefined>> = {};
+    columnPairs.forEach((p, i) => {
+      const data = columnsQueries[i]?.data;
+      if (!data) return;
+      (map[p.db] ??= {})[p.table] = data;
+    });
+    return map;
+  }, [columnPairs, columnsQueries]);
+
   const actionCtx = useMemo<PaletteActionContext>(
     () => ({ connected, connId, dialect }),
     [connected, connId, dialect],
@@ -352,26 +427,54 @@ function PaletteBody({
     [historyEntries],
   );
 
-  // Pool per mode, in section order (Recents / Tables+… / Sessions /
-  // Commands / History) — an empty query therefore truncates by section via
-  // selectTop.
+  const columnItems = useMemo(
+    () => (connected ? buildColumnItems(dbs, tablesByDb, columnsByDb) : []),
+    [connected, dbs, tablesByDb, columnsByDb],
+  );
+
+  // Pool per mode, in section order (Recents / Tables+… / Columns /
+  // Sessions / Commands / History) — an empty query therefore truncates by
+  // section via selectTop. Columns join the unified pool only for typed
+  // queries that aren't object-scoped; db mode assembles its own pool.
   const pool = useMemo<PaletteItem[]>(() => {
     if (parsed.mode === "commands") return actions;
     if (parsed.mode === "sessions") return sessionItems;
     if (parsed.mode === "history") return historyItems;
+    const includeColumns =
+      parsed.query.trim() !== "" && (!scope || scope.kind === "columns");
     return [
       ...recentItems,
       ...objectItems,
+      ...(includeColumns ? columnItems : []),
       ...sessionItems,
       ...actions,
       ...unifiedHistory,
     ];
-  }, [parsed.mode, actions, sessionItems, historyItems, recentItems, objectItems, unifiedHistory]);
+  }, [
+    parsed.mode,
+    parsed.query,
+    scope,
+    actions,
+    sessionItems,
+    historyItems,
+    recentItems,
+    objectItems,
+    columnItems,
+    unifiedHistory,
+  ]);
 
-  const selection = useMemo(
-    () => selectTop(pool, parsed.query),
-    [pool, parsed.query],
-  );
+  // db mode and dot-scoped queries bypass the generic pool: db mode keeps
+  // only objects + columns of matching dbs; a scope restricts to one db
+  // (objects) or one table (columns). Everything else ranks the full pool.
+  const selection = useMemo(() => {
+    if (parsed.mode === "db") {
+      return selectDbModeItems(objectItems, columnItems, parsed.query);
+    }
+    if (scope) {
+      return selectTop(applyScope(scope, objectItems, columnItems), scope.query);
+    }
+    return selectTop(pool, parsed.query);
+  }, [parsed.mode, parsed.query, scope, pool, objectItems, columnItems]);
 
   const topActions: PaletteActionItem[] = [];
   const topSessions: PaletteSessionItem[] = [];
@@ -381,11 +484,13 @@ function PaletteBody({
   const topRoutines: PaletteObjectItem[] = [];
   const topTriggers: PaletteObjectItem[] = [];
   const topEvents: PaletteObjectItem[] = [];
+  const topColumns: PaletteColumnItem[] = [];
   const topHistory: PaletteHistoryItem[] = [];
   for (const item of selection.items) {
     if (item.type === "action") topActions.push(item);
     else if (item.type === "session") topSessions.push(item);
     else if (item.type === "history") topHistory.push(item);
+    else if (item.type === "column") topColumns.push(item);
     else if (item.lastOpenedAt) topRecents.push(item);
     else if (item.kind === "table") topTables.push(item);
     else if (item.kind === "view") topViews.push(item);
@@ -405,9 +510,13 @@ function PaletteBody({
   const eventsLoading =
     connected && showEvents && secondWaveReady && eventQueries.some((q) => q.isPending);
 
-  // Object sections only exist in unified mode; in sessions/commands/history
-  // modes their pools are disjoint and loading skeletons must not leak in.
-  const showObjectSections = parsed.mode === "unified";
+  // Object sections exist in unified AND db modes (db hides everything
+  // global); in sessions/commands/history modes their pools are disjoint
+  // and loading skeletons must not leak in.
+  const showObjectSections = parsed.mode === "unified" || parsed.mode === "db";
+
+  const columnsLoading =
+    columnsWaveReady && columnsQueries.some((q) => q.isPending);
 
   const rowCount =
     topActions.length +
@@ -418,8 +527,10 @@ function PaletteBody({
     topRoutines.length +
     topTriggers.length +
     topEvents.length +
+    topColumns.length +
     topHistory.length +
-    (objectsLoading ? 1 : 0);
+    (objectsLoading ? 1 : 0) +
+    (columnsLoading ? 1 : 0);
 
   /** Enter/click activation; closes first so dialogs stack cleanly. */
   const runPrimary = useCallback(
@@ -432,6 +543,11 @@ function PaletteBody({
       } else if (item.type === "history") {
         // Open a NEW query tab pre-filled with the script.
         openQueryTabWithSql(item.sql);
+      } else if (item.type === "column") {
+        // Columns target their parent table — Enter opens the data grid
+        // with NO auto-filter (predictable), and they stay out of the
+        // recents model, which tracks object opens only.
+        if (connId !== null) openDataTable(connId, item.db, item.table);
       } else if (connId !== null) {
         recordRecent(item);
         switch (item.kind) {
@@ -465,6 +581,15 @@ function PaletteBody({
   /** Shift+Enter alternate activation. */
   const runAlternate = useCallback(
     (item: PaletteItem) => {
+      if (item.type === "column") {
+        // Parent table's designer — column-focused deep-links are not a
+        // tabs.ts capability (deliberately not invented here).
+        if (connId !== null) {
+          close();
+          openDesignerTab(connId, item.db, item.table);
+        }
+        return;
+      }
       if (item.type === "object") {
         if (connId === null) return;
         close();
@@ -496,7 +621,13 @@ function PaletteBody({
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Tab") {
       e.preventDefault();
-      const order: PaletteMode[] = ["unified", "commands", "sessions", "history"];
+      const order: PaletteMode[] = [
+        "unified",
+        "commands",
+        "sessions",
+        "history",
+        "db",
+      ];
       const idx = order.indexOf(parsed.mode);
       const next = e.shiftKey
         ? order[(idx - 1 + order.length) % order.length]
@@ -526,7 +657,9 @@ function PaletteBody({
             ? t("palette.placeholderCommands")
             : parsed.mode === "history"
               ? t("palette.placeholderHistory")
-              : t("palette.placeholder")
+              : parsed.mode === "db"
+                ? t("palette.placeholderDb")
+                : t("palette.placeholder")
         }
         onKeyDown={handleInputKeyDown}
       />
@@ -543,7 +676,7 @@ function PaletteBody({
           </div>
         )}
 
-        {topRecents.length > 0 && showObjectSections && (
+        {topRecents.length > 0 && parsed.mode === "unified" && (
           <CommandGroup heading={t("palette.section.recents")}>
             {topRecents.map((o) => (
               <PaletteRow
@@ -672,6 +805,41 @@ function PaletteBody({
             ))}
           </CommandGroup>
         )}
+
+        {/* Columns (Phase 3): typed queries only — the empty-query listing
+            never includes them. Icon + muted styling mirror DbTree's column
+            children (Key for PK, Hash otherwise). */}
+        {(topColumns.length > 0 || columnsLoading) &&
+          showObjectSections &&
+          parsed.query.trim() !== "" && (
+            <CommandGroup heading={t("palette.section.columns")}>
+              {columnsLoading &&
+                topColumns.length === 0 &&
+                [0, 1].map((i) => (
+                  <div key={i} className="flex items-center gap-2 px-2 py-1.5">
+                    <Skeleton className="size-3.5 rounded-sm" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                ))}
+              {topColumns.map((c) => (
+                <PaletteRow
+                  key={c.id}
+                  value={c.id}
+                  icon={
+                    c.pk ? (
+                      <Key className="size-3.5 shrink-0 text-warning" />
+                    ) : (
+                      <Hash className="size-3.5 shrink-0 opacity-40" />
+                    )
+                  }
+                  label={c.name}
+                  onSelect={() => runPrimary(c)}
+                  onAlternate={() => runAlternate(c)}
+                  meta={`${c.dataType ? `${c.dataType} · ` : ""}${c.db}.${c.table}`}
+                />
+              ))}
+            </CommandGroup>
+          )}
 
         {topSessions.length > 0 && (
           <CommandGroup heading={t("palette.section.sessions")}>

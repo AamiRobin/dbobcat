@@ -22,6 +22,11 @@
  * Phase 2: a leading `#` selects query-history mode (`PaletteHistoryItem`
  * pool), object items widen past tables/views to routines/triggers/events,
  * and recents are plain object rows stamped with `lastOpenedAt`.
+ *
+ * Phase 3: a leading `db:` selects database-scoped mode (objects + columns
+ * of matching dbs only), dot-scoped queries (`shop.ord`, `shop.users.email`)
+ * narrow unified matching, and a third-wave `column` item kind joins the
+ * pool below every object kind in the tiebreak chain.
  */
 
 import { t, type TKey } from "@/lib/i18n";
@@ -36,6 +41,7 @@ import { openExportDialog } from "@/stores/export-dialog";
 import { openImportWizard } from "@/stores/import-dialog";
 import { openServerToolTab } from "@/stores/tabs";
 import type {
+  ColumnMeta,
   DatabaseInfo,
   EventMeta,
   HistoryEntry,
@@ -51,7 +57,7 @@ import type {
 // Item model
 // ---------------------------------------------------------------------------
 
-export type PaletteMode = "unified" | "commands" | "sessions" | "history";
+export type PaletteMode = "unified" | "commands" | "sessions" | "history" | "db";
 
 /** Object kinds searchable in the palette (mirrors the tree's leaf kinds). */
 export type PaletteObjectKind = "table" | "view" | "routine" | "trigger" | "event";
@@ -103,7 +109,8 @@ export type PaletteItem =
   | PaletteActionItem
   | PaletteSessionItem
   | PaletteObjectItem
-  | PaletteHistoryItem;
+  | PaletteHistoryItem
+  | PaletteColumnItem;
 
 /** One executed script from the persisted query history (`#` mode). */
 export interface PaletteHistoryItem {
@@ -112,6 +119,25 @@ export interface PaletteHistoryItem {
   sql: string;
   connName: string;
   executedAt: string;
+}
+
+/**
+ * One column of a table (Phase 3 third wave). Activation targets the
+ * PARENT table — Enter opens its data grid, Shift+Enter its designer —
+ * columns themselves have no dedicated surface, and they never enter the
+ * recents model.
+ */
+export interface PaletteColumnItem {
+  type: "column";
+  /** Unique cmdk row value: `column:<db>.<table>.<name>`. */
+  id: string;
+  db: string;
+  table: string;
+  name: string;
+  /** Driver-native type (`varchar(40)`), shown as muted right meta. */
+  dataType?: string;
+  /** Primary-key flag — swaps DbTree's Hash icon for its Key. */
+  pk?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +150,8 @@ function stripOneSpace(rest: string): string {
 }
 
 /**
- * Leading `>` selects commands, `@` sessions, `#` query history; any other
+ * Leading `>` selects commands, `@` sessions, `#` query history and `db:`
+ * database-scoped mode (Phase 3, last slot in the Tab cycle); any other
  * text stays in unified mode with the raw input as the query.
  */
 export function parseMode(raw: string): { mode: PaletteMode; query: string } {
@@ -136,6 +163,9 @@ export function parseMode(raw: string): { mode: PaletteMode; query: string } {
   }
   if (raw.startsWith("#")) {
     return { mode: "history", query: stripOneSpace(raw.slice(1)) };
+  }
+  if (raw.startsWith("db:")) {
+    return { mode: "db", query: stripOneSpace(raw.slice(3)) };
   }
   return { mode: "unified", query: raw };
 }
@@ -415,6 +445,64 @@ export function buildObjectItems(
 }
 
 /**
+ * Per-db map of table → described columns (third-wave pool, Phase 3). The
+ * caller assembles it from the SAME `dbKeys.columns` cache the lazy tree
+ * uses, so anything already expanded in the tree costs nothing.
+ */
+export type ColumnsByDb = Record<
+  string,
+  Record<string, ColumnMeta[] | undefined>
+>;
+
+/**
+ * Scale honesty: a 100-db server × 50 tables × 40 columns puts hundreds of
+ * thousands of rows within reach. The per-db ceiling keeps the built pool
+ * bounded — once a db hits the cap its remaining columns are dropped
+ * deterministically (tree order, ordinal order within a table); other dbs
+ * are unaffected. Tune only with real-world evidence.
+ */
+export const COLUMN_POOL_CAP_PER_DB = 2000;
+
+/**
+ * Flatten third-wave column caches into palette rows. Only dbs whose table
+ * list has landed contribute (the caller's fan-out mirrors this), and only
+ * plain tables do — DbTree's view nodes carry no column children, so
+ * mirroring the tree keeps scope honest. Order: dbs × tree order × ordinal.
+ */
+export function buildColumnItems(
+  dbs: DatabaseInfo[],
+  tablesByDb: PoolByDb<TableMeta>,
+  columnsByDb: ColumnsByDb,
+  capPerDb: number = COLUMN_POOL_CAP_PER_DB,
+): PaletteColumnItem[] {
+  const items: PaletteColumnItem[] = [];
+  for (const db of dbs) {
+    const metas = tablesByDb[db.name];
+    if (!metas) continue; // tables wave not settled for this db
+    const columnsForDb = columnsByDb[db.name] ?? {};
+    let count = 0;
+    for (const meta of metas) {
+      if (meta.kind !== "table") continue;
+      for (const col of columnsForDb[meta.name] ?? []) {
+        if (count >= capPerDb) break;
+        count++;
+        items.push({
+          type: "column",
+          id: `column:${db.name}.${meta.name}.${col.name}`,
+          db: db.name,
+          table: meta.name,
+          name: col.name,
+          dataType: col.dataType,
+          pk: col.key === "PRI" ? true : undefined,
+        });
+      }
+      if (count >= capPerDb) break;
+    }
+  }
+  return items;
+}
+
+/**
  * Persisted history entries → palette rows, preserving the store's
  * most-recent-first order.
  */
@@ -482,6 +570,11 @@ export function itemSearchText(item: PaletteItem): string {
       return item.name;
     case "object":
       return `${item.db}.${item.name}`;
+    case "column":
+      // Dotted path keeps word-boundary matching per segment ("users" hits
+      // shop.users.email; "email" starts a word too). Data types stay out —
+      // "int" would flood every result.
+      return `${item.db}.${item.table}.${item.name}`;
     case "history":
       // Match against what the row shows (single-line snippet) plus the
       // connection it ran on, not the full multi-KB script.
@@ -511,18 +604,18 @@ function literalTier(q: string, lowerText: string): number | null {
 }
 
 /**
- * Score one item against the query. Empty queries match everything at
- * {@link SCORE_EMPTY} (callers fall back to section order). Regex handling
+ * Tiered score for a bare text against the query — the engine behind
+ * `scoreItem`, also used directly for `db:`-mode database-name matching.
+ * Empty queries match everything at {@link SCORE_EMPTY}. Regex handling
  * mirrors `compileTreeFilter`: try the trimmed query as a case-insensitive
  * regex; on a compile error fall back to the literal tiers plus a fuzzy
  * subsequence tail.
  */
-export function scoreItem(item: PaletteItem, query: string): number {
+export function scoreText(text: string, query: string): number {
   const trimmed = query.trim();
   if (!trimmed) return SCORE_EMPTY;
 
   const q = trimmed.toLowerCase();
-  const text = itemSearchText(item);
   const lower = text.toLowerCase();
   const tier = literalTier(q, lower);
 
@@ -534,6 +627,15 @@ export function scoreItem(item: PaletteItem, query: string): number {
     if (tier !== null) return tier;
     return fuzzySubsequence(q, lower) ? SCORE_FUZZY : SCORE_NO_MATCH;
   }
+}
+
+/**
+ * Score one item against the query via its searchable text
+ * ({@link itemSearchText}).
+ */
+export function scoreItem(item: PaletteItem, query: string): number {
+  if (!query.trim()) return SCORE_EMPTY;
+  return scoreText(itemSearchText(item), query);
 }
 
 // ---------------------------------------------------------------------------
@@ -548,9 +650,12 @@ export interface PaletteSelection {
 
 /**
  * Tiebreak between equal scores, most to least important:
- * table > view > routine > trigger > event > action > session > history.
- * Within one kind the original composition order decides (recency for
- * recents/history), keeping runs fully deterministic.
+ * table > view > routine > trigger > event > column > action > session >
+ * history. Columns sit below every object kind so they surface mainly when
+ * object names don't match well; a prefix hit on a column still beats a
+ * fuzzy hit on a table (tier decides first — that's desirable). Within one
+ * kind the original composition order decides (recency for recents/
+ * history), keeping runs fully deterministic.
  */
 function rankPriority(item: PaletteItem): number {
   if (item.type === "object") {
@@ -567,9 +672,10 @@ function rankPriority(item: PaletteItem): number {
         return 4;
     }
   }
-  if (item.type === "action") return 5;
-  if (item.type === "session") return 6;
-  return 7; // history
+  if (item.type === "column") return 5;
+  if (item.type === "action") return 6;
+  if (item.type === "session") return 7;
+  return 8; // history
 }
 
 /**
@@ -607,4 +713,134 @@ export function selectTop(
     items: top.map((entry) => entry.item),
     omittedCount: scored.length - top.length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Scoped queries — `db.object` / `db.object.column` (Phase 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Scoped unified query. Grammar (documented contract, tested in
+ * palette-items.test.ts): dot-separated SIMPLE identifiers only — Unicode
+ * letters/digits plus `_`/`$`; no quotes, backticks or whitespace.
+ *
+ *   "db."              → every object of any kind in db (empty remainder =
+ *                        list all; lenient trailing dot)
+ *   "db.fragment"      → objects in db matching fragment (2 segments match
+ *                        OBJECTS only)
+ *   "db.table.fragment"→ columns of db.table matching fragment (3 segments
+ *                        match COLUMNS only; trailing dot lists them all)
+ *
+ * The first segment must case-insensitively name a KNOWN database,
+ * otherwise the whole input falls back to plain unified matching (never a
+ * dead end). An unknown TABLE keeps the scope and honestly yields nothing.
+ * More than 3 segments, an empty middle segment, or any non-identifier
+ * character anywhere also fall back to plain matching.
+ */
+export type PaletteScope =
+  | { kind: "objects"; db: string; query: string }
+  | { kind: "columns"; db: string; table: string; query: string };
+
+const IDENT_SEGMENT = /^[\p{L}\p{N}_$]+$/u;
+
+export function parseScopedQuery(
+  raw: string,
+  knownDbs: readonly string[],
+): PaletteScope | null {
+  const query = raw.trim();
+  if (!query.includes(".")) return null;
+  const parts = query.split(".");
+  if (parts.length < 2 || parts.length > 3) return null;
+
+  // Every segment must be a simple identifier; only the LAST may be empty
+  // (the lenient trailing-dot form).
+  const last = parts.length - 1;
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i] === "") {
+      if (i !== last) return null;
+    } else if (!IDENT_SEGMENT.test(parts[i])) {
+      return null;
+    }
+  }
+
+  const lowerDb = parts[0].toLowerCase();
+  const db = knownDbs.find((d) => d.toLowerCase() === lowerDb);
+  if (!db) return null;
+
+  if (parts.length === 2) {
+    return { kind: "objects", db, query: parts[1] };
+  }
+  return { kind: "columns", db, table: parts[1], query: parts[2] };
+}
+
+/**
+ * Restrict the object/column pools to a parsed scope: canonical-db equality
+ * for both kinds (the scope carries the known spelling), plus case-
+ * insensitive table equality for column scopes. Recents, sessions, actions
+ * and history stay OUT of scoped results by design — tight and predictable.
+ */
+export function applyScope(
+  scope: PaletteScope,
+  objects: PaletteObjectItem[],
+  columns: PaletteColumnItem[],
+): PaletteItem[] {
+  if (scope.kind === "objects") {
+    return objects.filter((o) => o.db === scope.db);
+  }
+  const table = scope.table.toLowerCase();
+  return columns.filter(
+    (c) => c.db === scope.db && c.table.toLowerCase() === table,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// `db:` mode — first token picks databases, rest filters within them
+// ---------------------------------------------------------------------------
+
+/**
+ * `db:`-mode query grammar: the FIRST whitespace-separated token selects
+ * databases (tiered/fuzzy match against db names via {@link scoreText});
+ * everything after it filters items WITHIN those dbs through normal
+ * scoring. So "shop" lists shop's world, and "shop users" narrows to
+ * users-ish rows inside shop. No db matching the token → honest empty
+ * result (unlike scoped UNIFIED syntax there is no fallback: the mode was
+ * entered explicitly).
+ */
+export function parseDbModeQuery(query: string): {
+  dbToken: string;
+  rest: string;
+} {
+  const trimmed = query.trim();
+  const ws = trimmed.search(/\s/);
+  if (ws === -1) return { dbToken: trimmed, rest: "" };
+  return { dbToken: trimmed.slice(0, ws), rest: trimmed.slice(ws).trim() };
+}
+
+/**
+ * Selection for `db:` mode over the object + column pools. Empty query →
+ * object sections in composition order, NEVER columns (same empty-query
+ * rule as unified). Non-empty → items whose db matches the first token,
+ * ranked/capped for the remaining filter text.
+ */
+export function selectDbModeItems(
+  objects: PaletteObjectItem[],
+  columns: PaletteColumnItem[],
+  query: string,
+  cap = 50,
+): PaletteSelection {
+  if (!query.trim()) {
+    return {
+      items: objects.slice(0, cap),
+      omittedCount: Math.max(0, objects.length - cap),
+    };
+  }
+
+  const { dbToken, rest } = parseDbModeQuery(query);
+  const inScope = (db: string): boolean =>
+    scoreText(db, dbToken) !== SCORE_NO_MATCH;
+  const pool: PaletteItem[] = [
+    ...objects.filter((o) => inScope(o.db)),
+    ...columns.filter((c) => inScope(c.db)),
+  ];
+  return selectTop(pool, rest, cap);
 }

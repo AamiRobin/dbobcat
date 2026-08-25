@@ -2,25 +2,35 @@ import { describe, expect, test } from "bun:test";
 
 import type { TKey } from "./i18n";
 import {
+  COLUMN_POOL_CAP_PER_DB,
   SCORE_EXACT,
   SCORE_FUZZY,
   SCORE_NO_MATCH,
   SCORE_PREFIX,
   SCORE_SUBSTRING,
   SCORE_WORD,
+  applyScope,
   buildActionItems,
+  buildColumnItems,
   buildHistoryItems,
   buildObjectItems,
   buildRecentItems,
   buildSessionItems,
+  parseDbModeQuery,
   parseMode,
+  parseScopedQuery,
   scoreItem,
+  scoreText,
+  selectDbModeItems,
   selectTop,
   sliceRecentHistory,
+  type PaletteColumnItem,
   type PaletteItem,
+  type PaletteObjectItem,
 } from "./palette-items";
 import { SESSION_COLORS } from "./session-groups";
 import type {
+  ColumnMeta,
   DatabaseInfo,
   EventMeta,
   HistoryEntry,
@@ -52,12 +62,39 @@ const session = (id: string, name: string): PaletteItem => ({
   connect: async () => true,
 });
 
-const obj = (db: string, name: string, kind: "table" | "view" = "table"): PaletteItem => ({
+const obj = (
+  db: string,
+  name: string,
+  kind: "table" | "view" = "table",
+): PaletteObjectItem => ({
   type: "object",
   id: `object:${kind}:${db}.${name}`,
   db,
   name,
   kind,
+});
+
+const column = (
+  db: string,
+  table: string,
+  name: string,
+  dataType?: string,
+  pk?: boolean,
+): PaletteColumnItem => ({
+  type: "column",
+  id: `column:${db}.${table}.${name}`,
+  db,
+  table,
+  name,
+  ...(dataType !== undefined ? { dataType } : {}),
+  ...(pk ? { pk: true } : {}),
+});
+
+const colMeta = (name: string, key: string | null = null): ColumnMeta => ({
+  name,
+  dataType: "varchar(40)",
+  nullable: true,
+  key,
 });
 
 const history = (
@@ -107,6 +144,16 @@ describe("parseMode", () => {
     expect(parseMode("#select")).toEqual({ mode: "history", query: "select" });
     expect(parseMode("# select")).toEqual({ mode: "history", query: "select" });
     expect(parseMode("#")).toEqual({ mode: "history", query: "" });
+  });
+
+  test("leading db: selects database-scoped mode and strips prefix + one space", () => {
+    expect(parseMode("db:shop")).toEqual({ mode: "db", query: "shop" });
+    expect(parseMode("db: shop")).toEqual({ mode: "db", query: "shop" });
+    expect(parseMode("db:")).toEqual({ mode: "db", query: "" });
+    expect(parseMode("db: shop users")).toEqual({
+      mode: "db",
+      query: "shop users",
+    });
   });
 
   test("plain text stays unified verbatim", () => {
@@ -534,5 +581,304 @@ describe("buildRecentItems", () => {
       { kind: "table", db: "b", name: "a_second", lastOpenedAt: "2025-01-01T00:00:00Z" },
     ]);
     expect(items[0]?.name).toBe("z_first");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3: scoped queries (`db.object` / `db.object.column`)
+// ---------------------------------------------------------------------------
+
+describe("parseScopedQuery", () => {
+  const dbs = ["shop", "app", "MyDb"];
+
+  test("two segments scope objects to a known db with the remainder as query", () => {
+    expect(parseScopedQuery("shop.ord", dbs)).toEqual({
+      kind: "objects",
+      db: "shop",
+      query: "ord",
+    });
+  });
+
+  test("trailing dot = empty remainder (list everything in the db)", () => {
+    expect(parseScopedQuery("shop.", dbs)).toEqual({
+      kind: "objects",
+      db: "shop",
+      query: "",
+    });
+    expect(parseScopedQuery("shop", dbs)).toBeNull(); // no dot → plain
+  });
+
+  test("three segments scope columns to db.table", () => {
+    expect(parseScopedQuery("shop.users.email", dbs)).toEqual({
+      kind: "columns",
+      db: "shop",
+      table: "users",
+      query: "email",
+    });
+    // Lenient trailing dot lists all columns of the table.
+    expect(parseScopedQuery("app.users.", dbs)).toEqual({
+      kind: "columns",
+      db: "app",
+      table: "users",
+      query: "",
+    });
+  });
+
+  test("unknown db falls back to plain unified matching (no dead end)", () => {
+    expect(parseScopedQuery("zzz.ord", dbs)).toBeNull();
+    expect(parseScopedQuery("users.email", dbs)).toBeNull(); // users is no db
+  });
+
+  test("malformed input falls back: 4 segments, empty middle, whitespace, quotes", () => {
+    expect(parseScopedQuery("shop.users.email.x", dbs)).toBeNull();
+    expect(parseScopedQuery("shop..x", dbs)).toBeNull();
+    expect(parseScopedQuery("sh op.x", dbs)).toBeNull();
+    expect(parseScopedQuery("`shop`.x", dbs)).toBeNull();
+    expect(parseScopedQuery('"shop".x', dbs)).toBeNull();
+  });
+
+  test("db segment matches case-insensitively and returns the known spelling", () => {
+    expect(parseScopedQuery("SHOP.ord", dbs)).toEqual({
+      kind: "objects",
+      db: "shop",
+      query: "ord",
+    });
+    expect(parseScopedQuery("mydb.x", dbs)).toEqual({
+      kind: "objects",
+      db: "MyDb",
+      query: "x",
+    });
+  });
+
+  test("identifier segments allow unicode letters, digits, _ and $", () => {
+    expect(parseScopedQuery("app.order_items.$total", dbs)).not.toBeNull();
+    expect(parseScopedQuery("app.café.x", dbs)).not.toBeNull();
+  });
+
+  test("applyScope filters objects by canonical db", () => {
+    const objects = [obj("shop", "orders"), obj("app", "users")];
+    const scope = parseScopedQuery("shop.", dbs)!;
+    expect(applyScope(scope, objects, []).map((i) => i.id)).toEqual([
+      "object:table:shop.orders",
+    ]);
+  });
+
+  test("applyScope filters columns by db + case-insensitive table", () => {
+    const columns = [
+      column("shop", "orders", "id"),
+      column("shop", "Users", "email"),
+      column("app", "users", "name"),
+    ];
+    const scope = parseScopedQuery("shop.users.", dbs)!;
+    expect(applyScope(scope, [], columns).map((i) => i.id)).toEqual([
+      "column:shop.Users.email",
+    ]);
+  });
+
+  test("scoped ranking stays inside the db: selectTop over applyScope output", () => {
+    const objects = [obj("shop", "orders"), obj("shop", "ord_history"), obj("app", "ord")];
+    const scope = parseScopedQuery("shop.ord", dbs)!;
+    const ranked = selectTop(applyScope(scope, objects, []), scope.query);
+    // Both shop hits land on the word tier ("ord" starts both words); the
+    // app.ord row is scoped out entirely, and the equal-tier tie falls to
+    // composition order.
+    expect(ranked.items.map((i) => i.id)).toEqual([
+      "object:table:shop.orders",
+      "object:table:shop.ord_history",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3: column items
+// ---------------------------------------------------------------------------
+
+describe("buildColumnItems", () => {
+  const dbs: DatabaseInfo[] = [{ name: "app" }, { name: "shop" }];
+  const tablesByDb: Record<string, TableMeta[] | undefined> = {
+    app: [
+      { name: "users", kind: "table" },
+      { name: "v_orders", kind: "view" }, // views have no column children
+      { name: "mysql_internals", kind: "system_table" },
+    ],
+    shop: [{ name: "orders", kind: "table" }],
+  };
+  const columnsByDb = {
+    app: { users: [colMeta("id", "PRI"), colMeta("email")] },
+    shop: { orders: [colMeta("total")] },
+  };
+
+  test("flattens landed dbs × tables into rows carrying dataType + pk flag", () => {
+    const items = buildColumnItems(dbs, tablesByDb, columnsByDb);
+    expect(items.map((i) => `${i.db}.${i.table}.${i.name}`)).toEqual([
+      "app.users.id",
+      "app.users.email",
+      "shop.orders.total",
+    ]);
+    const pk = items[0];
+    expect(pk?.pk).toBe(true);
+    expect(pk?.dataType).toBe("varchar(40)");
+    expect(items[1]?.pk).toBeUndefined();
+  });
+
+  test("ids are unique", () => {
+    const items = buildColumnItems(dbs, tablesByDb, columnsByDb);
+    expect(new Set(items.map((i) => i.id)).size).toBe(items.length);
+  });
+
+  test("dbs whose tables wave has not landed contribute nothing (no crash)", () => {
+    const items = buildColumnItems([{ name: "ghost" }], {}, columnsByDb);
+    expect(items).toEqual([]);
+  });
+
+  test("per-db cap truncates deterministically without touching other dbs", () => {
+    const manyTables: Record<string, TableMeta[] | undefined> = {
+      big: [
+        { name: "a", kind: "table" },
+        { name: "b", kind: "table" },
+      ],
+      small: [{ name: "s", kind: "table" }],
+    };
+    const columns = {
+      big: { a: [colMeta("a1"), colMeta("a2")], b: [colMeta("b1"), colMeta("b2")] },
+      small: { s: [colMeta("s1")] },
+    };
+    const dbsBoth: DatabaseInfo[] = [{ name: "small" }, { name: "big" }];
+    const items = buildColumnItems(dbsBoth, manyTables, columns, 3);
+    // The cap is PER DB: small keeps its single column, big fills 3 slots
+    // across tables in tree order and b2 spills past the cap.
+    expect(items.map((i) => i.name)).toEqual(["s1", "a1", "a2", "b1"]);
+    expect(items.some((i) => i.name === "b2")).toBe(false);
+    // Default cap constant is the documented 2000.
+    expect(COLUMN_POOL_CAP_PER_DB).toBe(2000);
+  });
+
+  test("columns flow through scoreItem via their dotted path text", () => {
+    const item = column("shop", "users", "email");
+    expect(scoreItem(item, "email")).toBe(SCORE_WORD); // dots start words
+    expect(scoreItem(item, "users")).toBe(SCORE_WORD);
+    expect(scoreItem(item, "shop")).toBe(SCORE_PREFIX);
+    expect(scoreItem(item, "zzz")).toBe(SCORE_NO_MATCH);
+  });
+
+  test("tiebreak chain: column ranks below event but above action/session/history", () => {
+    // Every fixture lands on the WORD tier for "tab" (action label "New
+    // query tab" resolves via i18n) so only rankPriority separates them.
+    const items: PaletteItem[] = [
+      history("h1", "SELECT tab FROM t"),
+      session("s1", "x-tab"),
+      action("a-tab", "palette.action.newQuery"),
+      column("db", "t", "tab_col"),
+      obj("db", "tab_view", "view"),
+      {
+        type: "object",
+        id: "object:event:db.tab",
+        db: "db",
+        name: "tab",
+        kind: "event",
+      },
+      {
+        type: "object",
+        id: "object:trigger:db.tab",
+        db: "db",
+        name: "tab",
+        kind: "trigger",
+      },
+      {
+        type: "object",
+        id: "object:routine:db.tab",
+        db: "db",
+        name: "tab",
+        kind: "routine",
+      },
+      obj("db", "tab_table", "table"),
+    ];
+    const ranked = selectTop(items, "tab").items;
+    expect(ranked.map((i) => (i.type === "object" ? i.kind : i.type))).toEqual([
+      "table",
+      "view",
+      "routine",
+      "trigger",
+      "event",
+      "column",
+      "action",
+      "session",
+      "history",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3: `db:` mode
+// ---------------------------------------------------------------------------
+
+describe("parseDbModeQuery", () => {
+  test("first token selects the db, the rest filters within it", () => {
+    expect(parseDbModeQuery("shop")).toEqual({ dbToken: "shop", rest: "" });
+    expect(parseDbModeQuery("shop users email")).toEqual({
+      dbToken: "shop",
+      rest: "users email",
+    });
+    expect(parseDbModeQuery("  shop   users ")).toEqual({
+      dbToken: "shop",
+      rest: "users",
+    });
+    expect(parseDbModeQuery("")).toEqual({ dbToken: "", rest: "" });
+  });
+});
+
+describe("selectDbModeItems", () => {
+  const objects = [obj("app", "users"), obj("shop", "orders"), obj("shop", "order_lines")];
+  const columns = [column("shop", "orders", "total"), column("app", "users", "email")];
+
+  test("empty query lists object sections in composition order, never columns", () => {
+    const result = selectDbModeItems(objects, columns, "");
+    expect(result.items.map((i) => i.id)).toEqual(objects.map((o) => o.id));
+    expect(result.omittedCount).toBe(0);
+
+    const capped = selectDbModeItems(objects, columns, " ", 2);
+    expect(capped.items.length).toBe(2);
+    expect(capped.omittedCount).toBe(1);
+  });
+
+  test("db token narrows objects AND columns of matching dbs", () => {
+    const result = selectDbModeItems(objects, columns, "shop");
+    expect(result.items.map((i) => i.id)).toContain("object:table:shop.orders");
+    expect(result.items.map((i) => i.id)).toContain("column:shop.orders.total");
+    expect(
+      result.items.some((i) => (i.type === "object" || i.type === "column") && i.db === "app"),
+    ).toBe(false);
+  });
+
+  test("rest filters within the matched dbs (multi-token AND)", () => {
+    const result = selectDbModeItems(objects, columns, "shop order");
+    expect(result.items.map((i) => i.id)).toEqual([
+      "object:table:shop.orders",
+      "object:table:shop.order_lines",
+      "column:shop.orders.total",
+    ]);
+  });
+
+  test("no db matching the token dead-ends honestly (explicit mode)", () => {
+    expect(selectDbModeItems(objects, columns, "zzz").items).toEqual([]);
+  });
+
+  test("columns tiebreak below objects within one db", () => {
+    const tightObjects = [obj("shop", "email_archive")];
+    const tightColumns = [column("shop", "users", "email")];
+    const result = selectDbModeItems(tightObjects, tightColumns, "shop email");
+    // Same WORD tier for both — object first per rankPriority.
+    expect(result.items.map((i) => i.type)).toEqual(["object", "column"]);
+  });
+});
+
+describe("scoreText", () => {
+  test("scores bare text with the same tiers as scoreItem", () => {
+    expect(scoreText("billing", "billing")).toBe(SCORE_EXACT);
+    expect(scoreText("billing.profiles", "billing")).toBe(SCORE_PREFIX);
+    expect(scoreText("x_billing_y", "billing")).toBe(SCORE_WORD);
+    expect(scoreText("xbilling", "billing")).toBe(SCORE_SUBSTRING);
+    expect(scoreText("nothing", "zzz")).toBe(SCORE_NO_MATCH);
+    expect(scoreText("anything", "")).toBe(0);
   });
 });
