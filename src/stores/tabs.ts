@@ -7,6 +7,7 @@ export type TabType =
   | "query"
   | "data"
   | "designer"
+  | "diagram"
   | "object"
   | "users"
   | "processes"
@@ -40,6 +41,7 @@ const ICON_BY_TYPE: Record<TabType, string> = {
   query: "file-code",
   data: "table",
   designer: "workflow",
+  diagram: "network",
   object: "braces",
   users: "users",
   processes: "activity",
@@ -62,13 +64,15 @@ function nextTitle(type: TabType, tabs: Tab[]): string {
         ? "Data"
         : type === "designer"
           ? "Designer"
-          : type === "users"
-            ? "User manager"
-            : type === "processes"
-              ? "Process list"
-              : type === "variables"
-                ? "Variables"
-                : "Object";
+          : type === "diagram"
+            ? "Diagram"
+            : type === "users"
+              ? "User manager"
+              : type === "processes"
+                ? "Process list"
+                : type === "variables"
+                  ? "Variables"
+                  : "Object";
   return `${label} ${count}`;
 }
 
@@ -231,6 +235,31 @@ export function openDesignerTab(
       icon: "workflow",
       closable: true,
       meta: { connId, db, table },
+    };
+    return { tabs: [...s.tabs, tab], activeId: tab.id };
+  });
+}
+
+/**
+ * Open (or focus) the ER diagram tab for one database. One tab per
+ * connection + database; reopening focuses the existing one.
+ */
+export function openDiagramTab(connId: number, db: string): void {
+  useTabsStore.setState((s) => {
+    const existing = s.tabs.find(
+      (t) =>
+        t.type === "diagram" &&
+        t.meta.connId === connId &&
+        t.meta.db === db,
+    );
+    if (existing) return { activeId: existing.id };
+    const tab: Tab = {
+      id: makeId(),
+      type: "diagram",
+      title: `${db} — ER`,
+      icon: ICON_BY_TYPE.diagram,
+      closable: true,
+      meta: { connId, db },
     };
     return { tabs: [...s.tabs, tab], activeId: tab.id };
   });
