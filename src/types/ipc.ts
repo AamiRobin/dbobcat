@@ -143,6 +143,12 @@ export interface ColumnMeta {
   comment?: string | null;
 }
 
+/** One table's full column list from the ER diagram batch loader. */
+export interface TableSchemaData {
+  table: string;
+  columns: ColumnMeta[];
+}
+
 // ---------------------------------------------------------------------------
 // Data grid (Phase 2)
 // ---------------------------------------------------------------------------
