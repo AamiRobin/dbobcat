@@ -13,6 +13,9 @@
 //! - [`build_like_pattern`] / [`text_matches`]: shared search semantics so
 //!   the SQL predicate and the Rust-side matched-column detection agree.
 
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+
 use crate::connections::dialect::SqlDialect;
 use crate::connections::{FindMode, GrantRequest, GrantScope};
 use crate::error::{AppError, Result};
@@ -66,16 +69,34 @@ pub fn build_like_pattern(mode: FindMode, search: &str) -> Option<String> {
 /// Rust-side mirror of the SQL predicate: does `haystack` match under the
 /// given mode? Used to pick which column of a row produced the hit (the
 /// WHERE clause remains the authority for row inclusion).
+///
+/// Regex patterns are memoized by `(pattern, case-insensitive)` so a scan
+/// compiles the user's expression once, not once per candidate cell.
+/// Invalid patterns fall back to "no match" here (the pipeline already
+/// rejected them up front via [`compile_regex`]).
 pub fn text_matches(mode: FindMode, haystack: &str, needle: &str, case_sensitive: bool) -> bool {
-    let re = |r: regex::Regex| r.is_match(haystack);
     let fold = |s: &str| if case_sensitive { s.to_string() } else { s.to_lowercase() };
 
     match mode {
         FindMode::Contains => fold(haystack).contains(&fold(needle)),
         FindMode::Prefix => fold(haystack).starts_with(&fold(needle)),
         FindMode::Whole => fold(haystack) == fold(needle),
-        FindMode::Regex => compile_regex(needle, case_sensitive).map(re).unwrap_or(false),
+        FindMode::Regex => cached_regex(needle, case_sensitive)
+            .map(|re| re.is_match(haystack))
+            .unwrap_or(false),
     }
+}
+
+/// Memoized compiled user regexes keyed by `(pattern, case-insensitive)`.
+type RegexCache = HashMap<(String, bool), Option<regex::Regex>>;
+static REGEX_CACHE: LazyLock<Mutex<RegexCache>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn cached_regex(pattern: &str, case_sensitive: bool) -> Option<regex::Regex> {
+    let mut cache = REGEX_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache
+        .entry((pattern.to_string(), !case_sensitive))
+        .or_insert_with(|| compile_regex(pattern, case_sensitive).ok())
+        .clone()
 }
 
 /// Compile a user regex honouring the case flag; invalid patterns become

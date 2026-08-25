@@ -27,8 +27,8 @@ use crate::connections::{
     CreateUserRequest, DatabaseInfo, DistinctValue, EventMeta, ExecResult, FilterSpec,
     GrantDetail, GrantRequest, ProcessInfo, QueryOutcome, QueryPageRequest, QueryPageResult,
     ResolvedConnectionConfig, ResultColumnMeta, RowError, RowValue, RowsChunk, RoutineKind,
-    RoutineMeta, ServerInfo, ServerVariable, ShowCreateResult, SslMode, StatusVariable, TableDdl,
-    TableKind, TableMeta, TriggerMeta, UserMeta,
+    RoutineMeta, ServerInfo, ServerVariable, ShowCreateKind, ShowCreateResult, SslMode,
+    StatusVariable, TableDdl, TableKind, TableMeta, TriggerMeta, UserMeta,
 };
 use crate::error::{AppError, Result};
 
@@ -1095,15 +1095,15 @@ impl DbConnection for MysqlConnection {
         kind: RoutineKind,
     ) -> Result<ShowCreateResult> {
         let qualified = quote_qualified(&[database, name]);
-        let (stmt, kind_label, fallback) = match kind {
+        let (stmt, kind, fallback) = match kind {
             RoutineKind::Procedure => (
                 format!("SHOW CREATE PROCEDURE {qualified}"),
-                "procedure",
+                ShowCreateKind::Procedure,
                 2,
             ),
             RoutineKind::Function => (
                 format!("SHOW CREATE FUNCTION {qualified}"),
-                "function",
+                ShowCreateKind::Function,
                 2,
             ),
         };
@@ -1111,7 +1111,7 @@ impl DbConnection for MysqlConnection {
         Ok(ShowCreateResult {
             db: database.to_string(),
             object: name.to_string(),
-            kind: kind_label.into(),
+            kind,
             create_sql,
         })
     }
@@ -1149,7 +1149,7 @@ impl DbConnection for MysqlConnection {
         Ok(ShowCreateResult {
             db: database.to_string(),
             object: name.to_string(),
-            kind: "trigger".into(),
+            kind: ShowCreateKind::Trigger,
             create_sql,
         })
     }
@@ -1162,7 +1162,7 @@ impl DbConnection for MysqlConnection {
         Ok(ShowCreateResult {
             db: database.to_string(),
             object: name.to_string(),
-            kind: "view".into(),
+            kind: ShowCreateKind::View,
             create_sql,
         })
     }
@@ -1211,7 +1211,7 @@ impl DbConnection for MysqlConnection {
         Ok(ShowCreateResult {
             db: database.to_string(),
             object: name.to_string(),
-            kind: "event".into(),
+            kind: ShowCreateKind::Event,
             create_sql,
         })
     }

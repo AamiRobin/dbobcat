@@ -52,14 +52,23 @@ use crate::ssh::SshTunnelManager;
 /// Backend event carrying link-state transitions for one connection.
 pub const CONN_STATUS_EVENT: &str = "connection://status";
 
+/// Link-state value carried by [`ConnStatusEvent`]; serialized as the
+/// lowercase wire string the frontend expects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConnStatus {
+    Reconnecting,
+    Reconnected,
+    Lost,
+}
+
 /// Payload of [`CONN_STATUS_EVENT`]. Mirrors `ConnStatusEvent` in
 /// `src/types/ipc.ts`.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnStatusEvent {
     pub conn_id: u32,
-    /// "reconnecting" | "reconnected" | "lost".
-    pub status: String,
+    pub status: ConnStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
@@ -232,7 +241,7 @@ struct ConnectionHandle {
     /// Tunnel this connection dials through, if any. Updated after a
     /// successful silent reconnect so disconnect tears down the new tunnel.
     tunnel_id: Option<u32>,
-    /// Identity captured at connect time, served by `db_server_info`.
+    /// Identity captured at connect time and served to the frontend.
     server_info: ServerInfo,
 }
 
@@ -261,13 +270,13 @@ struct ActorState {
 
 impl ActorState {
     /// Emit a link-state transition to the frontend (best-effort).
-    fn emit(&self, status: &str, message: Option<String>) {
+    fn emit(&self, status: ConnStatus, message: Option<String>) {
         if let Some(app) = &self.app {
             let _ = app.emit(
                 CONN_STATUS_EVENT,
                 ConnStatusEvent {
                     conn_id: self.conn_id,
-                    status: status.to_string(),
+                    status,
                     message,
                 },
             );
@@ -293,7 +302,7 @@ impl ActorState {
         if !self.lost {
             self.lost = true;
             self.attempts_left = RECONNECT_ATTEMPTS;
-            self.emit("reconnecting", Some(message.to_string()));
+            self.emit(ConnStatus::Reconnecting, Some(message.to_string()));
             self.schedule_backoff();
         }
         true
@@ -380,13 +389,13 @@ impl ActorState {
         match self.attempt(driver).await {
             Ok(()) => {
                 self.lost = false;
-                self.emit("reconnected", None);
+                self.emit(ConnStatus::Reconnected, None);
             }
             Err(err) => {
                 self.attempts_left = self.attempts_left.saturating_sub(1);
                 if self.attempts_left == 0 {
                     let message = format!("reconnect failed: {err}");
-                    self.emit("lost", Some(message));
+                    self.emit(ConnStatus::Lost, Some(message));
                 }
             }
         }
@@ -1119,7 +1128,7 @@ async fn connection_task(
             if st.lost && st.reconnect.is_some() {
                 if st.attempt(&mut driver).await.is_ok() {
                     st.lost = false;
-                    st.emit("reconnected", None);
+                    st.emit(ConnStatus::Reconnected, None);
                 }
             }
             if st.lost {

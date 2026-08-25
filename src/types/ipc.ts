@@ -24,11 +24,13 @@ export type SslMode = "disabled" | "preferred" | "required";
 
 /**
  * SSH authentication. Mirrors `SshAuth` (internally tagged via `method`).
- * The password variant never carries a stored secret in SavedSession JSON —
- * it lives in the encrypted credential store under `<sessionId>#ssh`.
+ * Neither variant carries a stored secret in SavedSession JSON: the SSH login
+ * password lives in the encrypted credential store under `<sessionId>#ssh`,
+ * the key passphrase under `<sessionId>#key`. `password` is required because
+ * the Rust side always sends it (empty string when nothing is stored).
  */
 export type SshAuth =
-  | { method: "password"; password?: string }
+  | { method: "password"; password: string }
   | { method: "key"; keyPath: string; passphrase?: string | null };
 
 export interface SshConfig {

@@ -50,7 +50,6 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         schema::db_list_databases,
         schema::db_list_tables,
         schema::db_describe_table,
-        schema::db_server_info,
         // data grid
         data::data_query_page,
         data::data_apply_changes,
@@ -61,7 +60,6 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         query::query_run_script,
         query::query_history_list,
         query::query_history_clear,
-        schema::query_autocomplete_schema,
         // SQL snippets (Phase 9-B helpers panel)
         snippets::snippet_list,
         snippets::snippet_save,

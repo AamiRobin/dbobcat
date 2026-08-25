@@ -35,8 +35,8 @@ use crate::connections::{
     DatabaseInfo, DefaultKind, DistinctValue, EventMeta, ExecResult, FilterSpec, ForeignKeyMeta,
     IndexKind, IndexMeta, MaintenanceOp, ObjectKind, QueryOutcome, QueryPageRequest,
     QueryPageResult, ResolvedConnectionConfig, ResultColumnMeta, RowError, RowValue, RowsChunk,
-    RoutineKind, RoutineMeta, ServerInfo, ShowCreateResult, TableDdl, TableKind, TableMeta,
-    TableOptions, TriggerMeta,
+    RoutineKind, RoutineMeta, ServerInfo, ShowCreateKind, ShowCreateResult, TableDdl,
+    TableKind, TableMeta, TableOptions, TriggerMeta,
 };
 use crate::error::{AppError, Result};
 
@@ -1104,7 +1104,7 @@ impl DbConnection for SqliteConnection {
         Ok(ShowCreateResult {
             db: _database.to_string(),
             object: name.to_string(),
-            kind: "trigger".into(),
+            kind: ShowCreateKind::Trigger,
             create_sql: sql,
         })
     }
@@ -1124,7 +1124,7 @@ impl DbConnection for SqliteConnection {
         Ok(ShowCreateResult {
             db: _database.to_string(),
             object: name.to_string(),
-            kind: "view".into(),
+            kind: ShowCreateKind::View,
             create_sql: sql,
         })
     }

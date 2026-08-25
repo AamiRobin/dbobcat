@@ -567,14 +567,25 @@ pub struct AlterResult {
     pub error: Option<String>,
 }
 
+/// Object flavour reported by [`ShowCreateResult`]; serialized as the
+/// lowercase wire string ("view" | "procedure" | ... ) the frontend expects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ShowCreateKind {
+    View,
+    Procedure,
+    Function,
+    Trigger,
+    Event,
+}
+
 /// `SHOW CREATE <object>` payload shared by views/routines/triggers/events.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShowCreateResult {
     pub db: String,
     pub object: String,
-    /// "view" | "procedure" | "function" | "trigger" | "event".
-    pub kind: String,
+    pub kind: ShowCreateKind,
     pub create_sql: String,
 }
 

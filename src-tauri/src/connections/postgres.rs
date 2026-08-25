@@ -49,8 +49,8 @@ use crate::connections::{
     ExecResult, ForeignKeyMeta, GrantDetail, GrantRequest, IndexKind, IndexMeta, MaintenanceOp,
     ObjectKind, ProcessInfo, QueryOutcome, QueryPageRequest, QueryPageResult,
     ResolvedConnectionConfig, ResultColumnMeta, RowChange, RowError, RowValue, RowsChunk,
-    RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateResult, SslMode,
-    StatusVariable, TableDdl, TableKind, TableMeta, TableOptions, TriggerMeta, UserMeta,
+    RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateKind, ShowCreateResult,
+    SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TableOptions, TriggerMeta, UserMeta,
     FilterSpec,
 };
 use crate::error::{AppError, Result};
@@ -1945,10 +1945,9 @@ impl DbConnection for PgConnection {
                 db: database.to_string(),
                 object: name.to_string(),
                 kind: match kind {
-                    RoutineKind::Procedure => "procedure",
-                    RoutineKind::Function => "function",
-                }
-                .into(),
+                    RoutineKind::Procedure => ShowCreateKind::Procedure,
+                    RoutineKind::Function => ShowCreateKind::Function,
+                },
                 create_sql: r_string(row, 0)?,
             }),
             None => Err(AppError::Db(format!("routine {name} not found"))),
@@ -2000,7 +1999,7 @@ impl DbConnection for PgConnection {
             Some(row) => Ok(ShowCreateResult {
                 db: database.to_string(),
                 object: name.to_string(),
-                kind: "trigger".into(),
+                kind: ShowCreateKind::Trigger,
                 create_sql: r_string(row, 0)?,
             }),
             None => Err(AppError::Db(format!("trigger {name} not found"))),
@@ -2016,7 +2015,7 @@ impl DbConnection for PgConnection {
         Ok(ShowCreateResult {
             db: database.to_string(),
             object: name.to_string(),
-            kind: "view".into(),
+            kind: ShowCreateKind::View,
             create_sql: format!(
                 "CREATE OR REPLACE VIEW {} AS\n{}",
                 SqlDialect::Postgres.quote_qualified(&[database, name]),
