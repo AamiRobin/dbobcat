@@ -49,6 +49,55 @@ const MAX_STREAM_CHUNK: usize = 10_000;
 /// SQLite's modern default parameter ceiling (bundled >= 3.32).
 const MAX_BIND_PARAMS: usize = 32_000;
 
+/// One raw `PRAGMA foreign_key_list` row of a referencing child:
+/// `(child_table, fk_id, ref_table, from_col, to_col, on_update, on_delete)`.
+pub(crate) type LiteFkRow = (
+    String,
+    i64,
+    String,
+    String,
+    Option<String>,
+    String,
+    String,
+);
+
+/// Group raw `PRAGMA foreign_key_list` rows that reference `parent_table`
+/// into one [`ForeignKeyMeta`] per (child table, FK id). Rows must already
+/// be filtered to the parent; `to_col` may be NULL when the child references
+/// an implicit parent PK.
+pub(crate) fn group_lite_referencing_fks(
+    parent_table: &str,
+    raw: Vec<LiteFkRow>,
+) -> Vec<ForeignKeyMeta> {
+    let mut groups: std::collections::BTreeMap<(String, i64), ForeignKeyMeta> =
+        std::collections::BTreeMap::new();
+    for (child_table, id, _, from_col, to_col, on_update, on_delete) in raw {
+        let key = (child_table.clone(), id);
+        match groups.get_mut(&key) {
+            Some(fk) => {
+                fk.columns.push(from_col);
+                fk.ref_columns.push(to_col.unwrap_or_default());
+            }
+            None => {
+                groups.insert(
+                    key,
+                    ForeignKeyMeta {
+                        name: format!("FK_{id}_{child_table}"),
+                        columns: vec![from_col],
+                        ref_db: None,
+                        ref_table: parent_table.to_string(),
+                        ref_columns: vec![to_col.unwrap_or_default()],
+                        on_update: Some(on_update),
+                        on_delete: Some(on_delete),
+                        table: Some(child_table),
+                    },
+                );
+            }
+        }
+    }
+    groups.into_values().collect()
+}
+
 pub struct SqliteConnection {
     conn: Arc<Mutex<Connection>>,
     server_info: ServerInfo,
@@ -1033,6 +1082,7 @@ impl DbConnection for SqliteConnection {
                     .collect(),
                 on_delete: Some(on_delete.clone()),
                 on_update: Some(on_update.clone()),
+                table: None,
             });
         }
 
@@ -1046,6 +1096,54 @@ impl DbConnection for SqliteConnection {
             checks: Vec::new(),
             create_sql,
         })
+    }
+
+    async fn list_referencing_foreign_keys(
+        &mut self,
+        _database: &str,
+        table: &str,
+    ) -> Result<Vec<ForeignKeyMeta>> {
+        let d = SqlDialect::Sqlite;
+        let conn = lock_conn(&self.conn)?;
+        let mut table_stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+            )
+            .map_err(rusqlite_err)?;
+        let tables: Vec<String> = table_stmt
+            .query_map([], |row| row.get(0))
+            .map_err(rusqlite_err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(rusqlite_err)?;
+
+        // Same source as the forward listing: PRAGMA foreign_key_list per
+        // base table, keeping only entries that reference the queried table.
+        let mut raw: Vec<LiteFkRow> = Vec::new();
+        for child in tables {
+            let mut fk_stmt = conn
+                .prepare(&format!(
+                    "PRAGMA foreign_key_list({})",
+                    d.quote_ident(&child)
+                ))
+                .map_err(rusqlite_err)?;
+            let rows = fk_stmt
+                .query_map([], |row| {
+                    Ok((
+                        child.clone(),
+                        row.get(0)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                })
+                .map_err(rusqlite_err)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(rusqlite_err)?;
+            raw.extend(rows.into_iter().filter(|(_, _, ref_table, ..)| ref_table == table));
+        }
+        Ok(group_lite_referencing_fks(table, raw))
     }
 
     async fn list_routines(&mut self, _database: &str) -> Result<Vec<RoutineMeta>> {
@@ -1383,6 +1481,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn referencing_fk_pragma_rows_group_per_child_and_id() {
+        let fks = group_lite_referencing_fks(
+            "products",
+            vec![
+                (
+                    "line_items".into(),
+                    0,
+                    "products".into(),
+                    "product_id".into(),
+                    Some("id".into()),
+                    "NO ACTION".into(),
+                    "CASCADE".into(),
+                ),
+                (
+                    "stock_levels".into(),
+                    3,
+                    "products".into(),
+                    "sku".into(),
+                    Some("code".into()),
+                    "RESTRICT".into(),
+                    "RESTRICT".into(),
+                ),
+                (
+                    "line_items".into(),
+                    0,
+                    "products".into(),
+                    "variant_id".into(),
+                    Some("vid".into()),
+                    "NO ACTION".into(),
+                    "CASCADE".into(),
+                ),
+            ],
+        );
+        assert_eq!(fks.len(), 2);
+
+        let line_items = &fks[0];
+        assert_eq!(line_items.name, "FK_0_line_items");
+        assert_eq!(line_items.table.as_deref(), Some("line_items"));
+        assert_eq!(line_items.ref_table, "products");
+        assert_eq!(line_items.columns, vec!["product_id", "variant_id"]);
+        assert_eq!(line_items.ref_columns, vec!["id", "vid"]);
+        assert_eq!(line_items.on_delete.as_deref(), Some("CASCADE"));
+
+        let stock = &fks[1];
+        assert_eq!(stock.name, "FK_3_stock_levels");
+        assert_eq!(stock.columns, vec!["sku"]);
+    }
+
+    #[test]
     fn defaults_classify_like_sqlite_reports_them() {
         assert_eq!(classify_lite_default(None), (DefaultKind::None, None));
         assert_eq!(classify_lite_default(Some("")), (DefaultKind::None, None));
@@ -1589,6 +1736,7 @@ mod tests {
                 ref_columns: vec!["id".into()],
                 on_update: Some("CASCADE".into()),
                 on_delete: Some("SET NULL".into()),
+                table: None,
             }],
             options: TableOptions::default(),
         };

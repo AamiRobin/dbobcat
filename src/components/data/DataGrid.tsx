@@ -1,7 +1,14 @@
 import {
   useVirtualizer,
 } from "@tanstack/react-virtual";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, KeyRound } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ArrowUpRight,
+  ChevronDown,
+  KeyRound,
+} from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -30,7 +37,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { readClipboardText } from "@/lib/db-queries";
-import { buildForwardJumpFilters } from "@/lib/fk-navigation";
 import {
   cellDisplayText,
   cellRawText,
@@ -44,6 +50,12 @@ import {
   useChangesetStore,
   type InsertedRow,
 } from "@/stores/changesets";
+import { useTabHistory } from "@/stores/tab-history";
+import { useTabsStore } from "@/stores/tabs";
+import {
+  buildForwardJumpFilters,
+  buildReverseJumpFilters,
+} from "@/lib/fk-navigation";
 import type {
   FilterOp,
   FilterSpec,
@@ -120,6 +132,14 @@ export interface DataGridProps {
   fkGroups?: Record<string, ForeignKeyMeta[]>;
   /** Jump to the referenced row of one FK cell (forward navigation). */
   onGoToReferencedRow?: (fk: ForeignKeyMeta, cell: FocusedCell) => void;
+  /** Reverse references for this table; undefined until first requested. */
+  referencingFks?: ForeignKeyMeta[] | null;
+  /** True while the reverse lookup is in flight. */
+  referencingFksLoading?: boolean;
+  /** First hint that the user opened a Go-to menu — triggers the lazy fetch. */
+  onRequestReferencingFks?: () => void;
+  /** Open the child table filtered to rows referencing this parent row. */
+  onFindReferencingRows?: (fk: ForeignKeyMeta, cell: FocusedCell) => void;
   /** Load referenced values for one FK of this grid's table. */
   onLoadFkValues?: (fkName: string) => Promise<import("@/types/ipc").FkRefValues>;
   /** A FK row was picked; owners map values onto all affected columns. */
@@ -252,6 +272,14 @@ export function DataGrid(props: DataGridProps) {
           props.onStartEdit(props.focusedCell);
           return;
         }
+      }
+      // Alt+ArrowLeft: pop back through the FK-jump trail (data grids only;
+      // query-result grids pass a changeset key that is never on the stack).
+      if (e.altKey && e.key === "ArrowLeft" && !readOnly && props.onGoToReferencedRow) {
+        e.preventDefault();
+        const prev = useTabHistory.getState().back(props.tabId);
+        if (prev) useTabsStore.getState().setActive(prev);
+        return;
       }
       // Alt+ArrowRight: jump to the referenced row of the focused FK cell
       // (first constraint wins). NULL/non-FK cells simply don't navigate.
@@ -918,9 +946,21 @@ function GridCell({
     handlers.fkByColumn?.[meta.name];
 
   /**
-   * Go-to submenu: one entry per FK constraint on this column, disabled with
-   * a reason when the cell is NULL (no referenced row exists). Hidden when
-   * the column has no FK or navigation is unavailable.
+   * Hover ↗ affordance: forward jump via the column's first FK. Only real,
+   * non-NULL, non-locked FK cells of editable grids render it — and only for
+   * rows currently in the virtualizer window, so DOM cost stays bounded.
+   */
+  const showJumpGlyph =
+    kind === "real" &&
+    !!cellFk &&
+    !!handlers.onGoToReferencedRow &&
+    value !== undefined &&
+    value.t !== "null";
+
+  /**
+   * Go-to submenu: one entry per FK constraint on this column (disabled with
+   * a reason when the cell is NULL) plus the lazy "referencing" sub-menu.
+   * Hidden when the column has no FK or navigation is unavailable.
    */
   const goToItems = () => {
     if (!handlers.onGoToReferencedRow || readOnly || kind !== "real") return null;
@@ -959,6 +999,20 @@ function GridCell({
               </ContextMenuItem>
             );
           })}
+          {handlers.onFindReferencingRows && (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger
+                className="text-xs"
+                onPointerEnter={() => handlers.onRequestReferencingFks?.()}
+                onFocus={() => handlers.onRequestReferencingFks?.()}
+              >
+                {t("grid.fk.referencing")}
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-64">
+                <ReferencingItems rowData={rowData} columnNames={columnNames} rowId={rowId} colIndex={colIndex} handlers={handlers} />
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          )}
         </ContextMenuSubContent>
       </ContextMenuSub>
     );
@@ -1043,7 +1097,7 @@ function GridCell({
             }
           }}
           className={cn(
-            "relative flex shrink-0 items-center overflow-hidden border-r px-2 text-xs",
+            "group/cell relative flex shrink-0 items-center overflow-hidden border-r px-2 text-xs",
             numeric && "justify-end font-mono tabular-nums",
             temporal && "font-mono",
             // changed-cell tint wins over row background
@@ -1054,6 +1108,25 @@ function GridCell({
           )}
         >
           <CellValue value={value} dataType={meta.dataType} />
+          {showJumpGlyph && (
+            <button
+              type="button"
+              aria-label={t("grid.fk.jumpGlyph", { table: cellFk!.refTable })}
+              title={t("grid.fk.jumpGlyph", { table: cellFk!.refTable })}
+              className={cn(
+                "absolute inset-y-0 right-0 z-[5] flex w-5 items-center justify-center",
+                "bg-background/90 text-muted-foreground hover:text-primary",
+                "opacity-0 pointer-events-none group-hover/cell:opacity-100 group-hover/cell:pointer-events-auto",
+              )}
+              onClick={(e) => {
+                e.stopPropagation();
+                handlers.onGoToReferencedRow?.(cellFk!, { rowId, colIndex });
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+            >
+              <ArrowUpRight className="size-3.5" />
+            </button>
+          )}
           {editing && cellFk && handlers.onFkPick && handlers.onLoadFkValues && (
             <CellEditorWithFk
               initialValue={cellRawText(value)}
@@ -1087,6 +1160,71 @@ function GridCell({
       </ContextMenuTrigger>
       {menu}
     </ContextMenu>
+  );
+}
+
+/**
+ * Items of the "Rows referencing this row" sub-menu. Data arrives lazily —
+ * the parent table's reverse-FK lookup is only fetched once the user hovers
+ * into this branch (see `onRequestReferencingFks`).
+ */
+function ReferencingItems({
+  rowData,
+  columnNames,
+  rowId,
+  colIndex,
+  handlers,
+}: {
+  rowData?: RowValue[];
+  columnNames: string[];
+  rowId: string;
+  colIndex: number;
+  handlers: CellHandlers;
+}) {
+  if (handlers.referencingFksLoading) {
+    return (
+      <ContextMenuItem disabled className="text-xs">
+        {t("grid.fk.loadingRefs")}
+      </ContextMenuItem>
+    );
+  }
+  const refs = handlers.referencingFks;
+  if (!refs || refs.length === 0) {
+    return (
+      <ContextMenuItem disabled className="text-xs">
+        {t("grid.fk.noRefs")}
+      </ContextMenuItem>
+    );
+  }
+  return (
+    <>
+      {refs.map((fk) => {
+        const jumpable =
+          rowData !== undefined &&
+          buildReverseJumpFilters(fk, rowData, columnNames) !== null;
+        // "{table}.{column}"; composite FKs lead with the first column.
+        const column =
+          fk.columns.length > 1
+            ? `${fk.columns[0]} +${fk.columns.length - 1}`
+            : fk.columns[0];
+        return (
+          <ContextMenuItem
+            key={`${fk.table ?? "?"}:${fk.name}`}
+            className="text-xs"
+            disabled={!jumpable}
+            title={!jumpable ? t("grid.fk.nullCell") : fk.name}
+            onClick={() =>
+              handlers.onFindReferencingRows?.(fk, { rowId, colIndex })
+            }
+          >
+            {t("grid.fk.referencingItem", {
+              table: fk.table ?? "?",
+              column,
+            })}
+          </ContextMenuItem>
+        );
+      })}
+    </>
   );
 }
 

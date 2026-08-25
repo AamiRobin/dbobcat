@@ -40,10 +40,10 @@ use crate::connections::traits::DbConnection;
 use crate::connections::{
     AlterUserRequest, ApplyChangesRequest, ApplyChangesResult, ColumnMeta, ConnInfo,
     CreateUserRequest, DatabaseInfo, DistinctValue, EventMeta, ExecResult, FilterSpec,
-    FkRefValues, GrantDetail, GrantRequest, ProcessInfo, QueryOutcome, QueryPageRequest,
-    QueryPageResult, ResolvedConnectionConfig, RowValue, RowsChunk, RoutineKind, RoutineMeta,
-    ServerInfo, ServerVariable, ShowCreateResult, StatusVariable, TableDdl, TableMeta,
-    TriggerMeta, UserMeta,
+    FkRefValues, ForeignKeyMeta, GrantDetail, GrantRequest, ProcessInfo, QueryOutcome,
+    QueryPageRequest, QueryPageResult, ResolvedConnectionConfig, RowValue, RowsChunk,
+    RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateResult, StatusVariable,
+    TableDdl, TableMeta, TriggerMeta, UserMeta,
 };
 use crate::connections::sql::build_fk_ref_sql;
 use crate::error::{AppError, Result};
@@ -122,6 +122,11 @@ enum ConnectionCommand {
         database: String,
         table: String,
         reply: oneshot::Sender<Result<TableDdl>>,
+    },
+    ListReferencingFks {
+        database: String,
+        table: String,
+        reply: oneshot::Sender<Result<Vec<ForeignKeyMeta>>>,
     },
     ListRoutines {
         database: String,
@@ -772,6 +777,25 @@ impl ConnectionManager {
         .await
     }
 
+    /// Foreign keys pointing at `database.table` (reverse view; Phase 10-B).
+    pub async fn list_referencing_foreign_keys(
+        &self,
+        conn_id: u32,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<ForeignKeyMeta>> {
+        let (db, tbl) = (database.to_string(), table.to_string());
+        self.request(
+            conn_id,
+            move |reply| ConnectionCommand::ListReferencingFks {
+                database: db,
+                table: tbl,
+                reply,
+            },
+        )
+        .await
+    }
+
     pub async fn list_routines(&self, conn_id: u32, database: &str) -> Result<Vec<RoutineMeta>> {
         let db = database.to_string();
         self.request(conn_id, move |reply| ConnectionCommand::ListRoutines {
@@ -1209,6 +1233,9 @@ async fn connection_task(
                 reply,
             } => {
                 run_cmd!(reply, driver.get_table_ddl(&database, &table));
+            }
+            ConnectionCommand::ListReferencingFks { database, table, reply } => {
+                run_cmd!(reply, driver.list_referencing_foreign_keys(&database, &table));
             }
             ConnectionCommand::ListRoutines { database, reply } => {
                 run_cmd!(reply, driver.list_routines(&database));

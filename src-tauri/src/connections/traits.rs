@@ -12,10 +12,10 @@ use tokio::sync::mpsc;
 
 use crate::connections::{
     AlterUserRequest, ApplyChangesRequest, ApplyChangesResult, ColumnMeta, CreateUserRequest,
-    DatabaseInfo, DistinctValue, EventMeta, ExecResult, FilterSpec, GrantDetail, GrantRequest,
-    ProcessInfo, QueryOutcome, QueryPageRequest, QueryPageResult, ResultColumnMeta, RowValue,
-    RowsChunk, RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateResult,
-    StatusVariable, TableDdl, TableMeta, TriggerMeta, UserMeta,
+    DatabaseInfo, DistinctValue, EventMeta, ExecResult, FilterSpec, ForeignKeyMeta, GrantDetail,
+    GrantRequest, ProcessInfo, QueryOutcome, QueryPageRequest, QueryPageResult,
+    ResultColumnMeta, RowValue, RowsChunk, RoutineKind, RoutineMeta, ServerInfo, ServerVariable,
+    ShowCreateResult, StatusVariable, TableDdl, TableMeta, TriggerMeta, UserMeta,
 };
 use crate::error::{AppError, Result};
 
@@ -109,6 +109,19 @@ pub trait DbConnection: Send {
         database: &str,
         table: &str,
     ) -> Result<TableDdl> {
+        let _ = (database, table);
+        Err(unsupported())
+    }
+
+    /// Foreign keys pointing AT this table (reverse view). Each entry
+    /// describes the CHILD constraint — `columns` are the child's FK
+    /// columns, `ref_columns` the queried parent's referenced columns and
+    /// `table` the child table name.
+    async fn list_referencing_foreign_keys(
+        &mut self,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<ForeignKeyMeta>> {
         let _ = (database, table);
         Err(unsupported())
     }

@@ -25,10 +25,10 @@ use crate::connections::traits::DbConnection;
 use crate::connections::{
     quote_qualified, AlterUserRequest, ApplyChangesRequest, ApplyChangesResult, ColumnMeta,
     CreateUserRequest, DatabaseInfo, DistinctValue, EventMeta, ExecResult, FilterSpec,
-    GrantDetail, GrantRequest, ProcessInfo, QueryOutcome, QueryPageRequest, QueryPageResult,
-    ResolvedConnectionConfig, ResultColumnMeta, RowError, RowValue, RowsChunk, RoutineKind,
-    RoutineMeta, ServerInfo, ServerVariable, ShowCreateKind, ShowCreateResult, SslMode,
-    StatusVariable, TableDdl, TableKind, TableMeta, TriggerMeta, UserMeta,
+    ForeignKeyMeta, GrantDetail, GrantRequest, ProcessInfo, QueryOutcome, QueryPageRequest,
+    QueryPageResult, ResolvedConnectionConfig, ResultColumnMeta, RowError, RowValue, RowsChunk,
+    RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateKind, ShowCreateResult,
+    SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TriggerMeta, UserMeta,
 };
 use crate::error::{AppError, Result};
 
@@ -42,6 +42,53 @@ const MAX_PAGE_SIZE: u32 = 50_000;
 /// Engines that support multi-statement transactions. Anything else falls
 /// back to per-row autocommit (still collecting per-row errors).
 const TRANSACTIONAL_ENGINES: [&str; 4] = ["INNODB", "NDB", "ROCKSDB", "TOKUDB"];
+
+/// One raw `KEY_COLUMN_USAGE` row: (constraint name, child table, child
+/// column, referenced column, update rule, delete rule).
+pub(crate) type KeyUsageRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+);
+
+/// Group raw `KEY_COLUMN_USAGE` rows into one [`ForeignKeyMeta`] per
+/// constraint. Rows arrive ordered by (child table, constraint name,
+/// ordinal position); `parent_table` becomes each entry's `ref_table`.
+pub(crate) fn group_referencing_fks(
+    parent_table: &str,
+    rows: Vec<KeyUsageRow>,
+) -> Vec<ForeignKeyMeta> {
+    let mut groups: std::collections::BTreeMap<(String, String), ForeignKeyMeta> =
+        std::collections::BTreeMap::new();
+    for (name, child_table, column, ref_column, on_update, on_delete) in rows {
+        let key = (child_table.clone(), name.clone());
+        match groups.get_mut(&key) {
+            Some(fk) => {
+                fk.columns.push(column);
+                fk.ref_columns.push(ref_column);
+            }
+            None => {
+                groups.insert(
+                    key,
+                    ForeignKeyMeta {
+                        name,
+                        columns: vec![column],
+                        ref_db: None,
+                        ref_table: parent_table.to_string(),
+                        ref_columns: vec![ref_column],
+                        on_update,
+                        on_delete,
+                        table: Some(child_table),
+                    },
+                );
+            }
+        }
+    }
+    groups.into_values().collect()
+}
 
 pub struct MysqlConnection {
     /// `Some` until closed; lets `close()` consume the conn to send QUIT.
@@ -1005,6 +1052,48 @@ impl DbConnection for MysqlConnection {
         })
     }
 
+    async fn list_referencing_foreign_keys(
+        &mut self,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<ForeignKeyMeta>> {
+        // Children are scoped to the same schema so the returned metadata is
+        // reachable without a cross-database jump (reverse navigation opens
+        // the child in `database`).
+        let rows = run_query(
+            self.conn()?,
+            "SELECT kcu.CONSTRAINT_NAME, kcu.TABLE_NAME, kcu.COLUMN_NAME, \
+                    kcu.REFERENCED_COLUMN_NAME, rc.UPDATE_RULE, rc.DELETE_RULE \
+             FROM information_schema.KEY_COLUMN_USAGE kcu \
+             LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc \
+               ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA \
+              AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME \
+             WHERE kcu.CONSTRAINT_SCHEMA = ? \
+               AND kcu.REFERENCED_TABLE_SCHEMA = ? \
+               AND kcu.REFERENCED_TABLE_NAME = ? \
+             ORDER BY kcu.TABLE_NAME, kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION",
+            Params::Positional(vec![
+                database.into(),
+                database.into(),
+                table.into(),
+            ]),
+        )
+        .await?;
+
+        let mut raw = Vec::with_capacity(rows.len());
+        for row in &rows {
+            raw.push((
+                col_string(row, 0)?,
+                col_string(row, 1)?,
+                col_string(row, 2)?,
+                col_string(row, 3)?,
+                col_opt_string(row, 4)?,
+                col_opt_string(row, 5)?,
+            ));
+        }
+        Ok(group_referencing_fks(table, raw))
+    }
+
     async fn list_routines(&mut self, database: &str) -> Result<Vec<RoutineMeta>> {
         let rows = run_query(
             self.conn()?,
@@ -1575,6 +1664,62 @@ mod tests {
             .with_column_length(length)
             .with_character_set(charset)
             .with_flags(flags)
+    }
+
+    #[test]
+    fn referencing_fk_rows_group_per_constraint_in_ordinal_order() {
+        // Rows arrive ordered by ordinal position within each constraint.
+        let fks = group_referencing_fks(
+            "products",
+            vec![
+                (
+                    "fk_line_items".into(),
+                    "line_items".into(),
+                    "order_id".into(),
+                    "id".into(),
+                    Some("NO ACTION".into()),
+                    Some("CASCADE".into()),
+                ),
+                (
+                    "fk_shipments".into(),
+                    "shipments".into(),
+                    "product_code".into(),
+                    "code".into(),
+                    None,
+                    None,
+                ),
+                (
+                    "fk_line_items".into(),
+                    "line_items".into(),
+                    "warehouse_id".into(),
+                    "depot".into(),
+                    None,
+                    None,
+                ),
+                (
+                    "fk_line_items".into(),
+                    "line_items".into(),
+                    "region_id".into(),
+                    "region".into(),
+                    None,
+                    None,
+                ),
+            ],
+        );
+        assert_eq!(fks.len(), 2);
+
+        let line_items = &fks[0];
+        assert_eq!(line_items.name, "fk_line_items");
+        assert_eq!(line_items.table.as_deref(), Some("line_items"));
+        assert_eq!(line_items.ref_table, "products");
+        assert_eq!(line_items.columns, vec!["order_id", "warehouse_id", "region_id"]);
+        assert_eq!(line_items.ref_columns, vec!["id", "depot", "region"]);
+        assert_eq!(line_items.on_delete.as_deref(), Some("CASCADE"));
+
+        let shipments = &fks[1];
+        assert_eq!(shipments.table.as_deref(), Some("shipments"));
+        assert_eq!(shipments.columns, vec!["product_code"]);
+        assert_eq!(shipments.on_update, None);
     }
 
     #[test]

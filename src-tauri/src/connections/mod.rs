@@ -442,6 +442,12 @@ pub struct ForeignKeyMeta {
     pub on_update: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_delete: Option<String>,
+    /// Table this constraint lives on. Only populated by the REVERSE lookup
+    /// (`list_referencing_foreign_keys`), where the constraint belongs to a
+    /// child table rather than the queried parent; forward listings leave it
+    /// unset because the owning [`TableDdl`] already carries it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<String>,
 }
 
 /// A table option that is round-tripped verbatim without a dedicated field

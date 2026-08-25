@@ -68,6 +68,7 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         objects::obj_get_table_ddl,
         objects::obj_list_indexes,
         objects::obj_list_foreign_keys,
+        objects::obj_list_referencing_foreign_keys,
         objects::obj_create_table,
         objects::obj_alter_table,
         objects::obj_drop_objects,

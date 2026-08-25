@@ -355,6 +355,12 @@ export interface ForeignKeyMeta {
   /** Raw action text: CASCADE, SET NULL, RESTRICT, NO ACTION, SET DEFAULT. */
   onUpdate?: string | null;
   onDelete?: string | null;
+  /**
+   * Table this constraint lives on. Only set by the REVERSE lookup
+   * (`obj_list_referencing_foreign_keys`), where the entry describes a child
+   * table's constraint; forward listings omit it.
+   */
+  table?: string | null;
 }
 
 /** A table option round-tripped verbatim (AVG_ROW_LENGTH, PAGE_CHECKSUM...). */

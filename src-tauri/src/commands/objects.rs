@@ -59,6 +59,19 @@ pub async fn obj_list_foreign_keys(
         .foreign_keys)
 }
 
+/// Foreign keys pointing AT a table (reverse view; Phase 10-B FK navigation).
+#[tauri::command]
+pub async fn obj_list_referencing_foreign_keys(
+    connections: State<'_, ConnectionManager>,
+    conn_id: u32,
+    db: String,
+    table: String,
+) -> Result<Vec<ForeignKeyMeta>> {
+    connections
+        .list_referencing_foreign_keys(conn_id, &db, &table)
+        .await
+}
+
 /// Create a table from the designer's request; returns the server's final
 /// CREATE TABLE text on success.
 #[tauri::command]

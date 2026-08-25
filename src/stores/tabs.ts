@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { FilterSpec, ObjectKind, RoutineKind } from "@/types/ipc";
+import { useTabHistory } from "@/stores/tab-history";
 
 export type TabType =
   | "query"
@@ -98,6 +99,8 @@ export const useTabsStore = create<TabsState>((set) => ({
       const idx = s.tabs.findIndex((t) => t.id === id);
       if (idx === -1) return s;
       const tabs = s.tabs.filter((t) => t.id !== id);
+      // Keep the FK-jump trail free of dead tabs.
+      useTabHistory.getState().remove(id);
       let activeId = s.activeId;
       if (s.activeId === id) {
         // Prefer the neighbour on the left, else the first remaining tab.
@@ -154,6 +157,8 @@ export function openDataTable(
             }
           : t,
       );
+      // Seeded re-open = a navigation step; record it for Alt+ArrowLeft.
+      useTabHistory.getState().push(existing.id);
       return { tabs, activeId: existing.id };
     }
     const tab: Tab = {
@@ -170,6 +175,7 @@ export function openDataTable(
         filterEpoch: seeded ? 1 : 0,
       },
     };
+    if (seeded) useTabHistory.getState().push(tab.id);
     return { tabs: [...s.tabs, tab], activeId: tab.id };
   });
 }

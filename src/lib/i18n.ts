@@ -236,6 +236,11 @@ export const en = {
   "grid.fk.goToComposite": "{table} ({count} columns)",
   "grid.fk.nullCell": "cell is NULL",
   "grid.fk.constraint": "{name}",
+  "grid.fk.referencing": "Rows referencing this row",
+  "grid.fk.referencingItem": "{table}.{column}",
+  "grid.fk.noRefs": "No referencing rows.",
+  "grid.fk.loadingRefs": "Looking up…",
+  "grid.fk.jumpGlyph": "Open referenced row in {table}",
   "query.editable.postChanges": "Post changes",
   "query.editable.discard": "Discard",
   "query.editable.noTable":

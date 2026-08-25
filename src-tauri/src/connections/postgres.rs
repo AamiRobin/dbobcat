@@ -1852,6 +1852,7 @@ impl DbConnection for PgConnection {
                 ref_columns: r_vec_string(row, 5)?,
                 on_update: Some(fk_action_letter(r_opt_char(row, 1)?.unwrap_or('a')).to_string()),
                 on_delete: Some(fk_action_letter(r_opt_char(row, 2)?.unwrap_or('a')).to_string()),
+                table: None,
             });
         }
 
@@ -1904,6 +1905,48 @@ impl DbConnection for PgConnection {
             checks,
             create_sql,
         })
+    }
+
+    async fn list_referencing_foreign_keys(
+        &mut self,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<ForeignKeyMeta>> {
+        let relid = self.relid(database, table).await?;
+        // Mirror of the forward FK query with the join flipped: children
+        // (conrelid) drive the constraint, the queried table is confrelid.
+        let fk_rows = self
+            .client
+            .query(
+                "SELECT con.conname, con.confupdtype, con.confdeltype, ct.relname, \
+                        (SELECT array_agg(sa.attname ORDER BY x.ord) \
+                           FROM unnest(con.conkey) WITH ORDINALITY AS x(attnum, ord) \
+                           JOIN pg_attribute sa ON sa.attrelid = con.conrelid AND sa.attnum = x.attnum), \
+                        (SELECT array_agg(ra.attname ORDER BY y.ord) \
+                           FROM unnest(con.confkey) WITH ORDINALITY AS y(attnum, ord) \
+                           JOIN pg_attribute ra ON ra.attrelid = con.confrelid AND ra.attnum = y.attnum) \
+                 FROM pg_constraint con JOIN pg_class ct ON ct.oid = con.conrelid \
+                 WHERE con.confrelid = $1 AND con.contype = 'f' \
+                 ORDER BY ct.relname, con.conname",
+                &[&relid],
+            )
+            .await?;
+
+        let mut foreign_keys: Vec<ForeignKeyMeta> = Vec::new();
+        for row in &fk_rows {
+            foreign_keys.push(ForeignKeyMeta {
+                name: r_string(row, 0)?,
+                // conkey: child-side columns; confkey: referenced (parent).
+                columns: r_vec_string(row, 4)?,
+                ref_db: None,
+                ref_table: table.to_string(),
+                ref_columns: r_vec_string(row, 5)?,
+                on_update: Some(fk_action_letter(r_opt_char(row, 1)?.unwrap_or('a')).to_string()),
+                on_delete: Some(fk_action_letter(r_opt_char(row, 2)?.unwrap_or('a')).to_string()),
+                table: Some(r_string(row, 3)?),
+            });
+        }
+        Ok(foreign_keys)
     }
 
     async fn list_routines(&mut self, database: &str) -> Result<Vec<RoutineMeta>> {

@@ -925,6 +925,7 @@ fn parse_fk_tail(name: Option<String>, columns: Vec<String>, toks: &[Tok], mut j
         ref_columns,
         on_update,
         on_delete,
+        table: None,
     }
 }
 

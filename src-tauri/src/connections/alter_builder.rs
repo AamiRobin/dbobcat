@@ -862,6 +862,7 @@ mod tests {
             ref_columns: vec!["cid".into()],
             on_update: Some("CASCADE".into()),
             on_delete: Some("SET NULL".into()),
+            table: None,
         });
         let plan = build_alter_table("shop", "orders", &ddl_from(base), &desired).unwrap();
         let joined = plan.statements.join("\n");

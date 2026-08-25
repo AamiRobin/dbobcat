@@ -31,11 +31,12 @@ import { notify } from "@/lib/toast";
 import { openExportDialog } from "@/stores/export-dialog";
 import { openImportWizard } from "@/stores/import-dialog";
 import { getChangeset, useChangesetStore } from "@/stores/changesets";
-import { fetchForeignKeys } from "@/lib/object-queries";
 import {
   buildForwardJumpFilters,
+  buildReverseJumpFilters,
   fkGroupsByColumn,
 } from "@/lib/fk-navigation";
+import { fetchForeignKeys, fetchReferencingForeignKeys, objKeys } from "@/lib/object-queries";
 import { openDataTable } from "@/stores/tabs";
 import { parseTsvRows, tsvCellToRowValue } from "@/lib/tsv-paste";
 import type { Tab } from "@/stores/tabs";
@@ -243,6 +244,17 @@ function DataViewInner({
     return map;
   }, [fkGroups]);
 
+  // Reverse references: fetched only once a Go-to submenu first asks for
+  // them, then cached for the connection's lifetime (featherweight default).
+  const [refsRequested, setRefsRequested] = useState(false);
+  const onRequestReferencingFks = useCallback(() => setRefsRequested(true), []);
+  const referencingFks = useQuery({
+    queryKey: objKeys.referencingFks(connId, db, table),
+    queryFn: () => fetchReferencingForeignKeys(connId, db, table),
+    enabled: refsRequested,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
   // Warn once per table about PK-less editing (full-row matching).
   useEffect(() => {
     if (columnsMeta.length > 0 && pkColumns === null) {
@@ -307,6 +319,23 @@ function DataViewInner({
       openDataTable(connId, fk.refDb ?? db, fk.refTable, jump);
     },
     [columnNames, connId, db, rows],
+  );
+
+  /**
+   * Reverse jump: filter the CHILD table down to rows referencing this
+   * parent row. The reverse lookup is scoped to the current database, so the
+   * child opens in `db` (cross-schema children are out of scope in 10-B).
+   */
+  const onFindReferencingRows = useCallback(
+    (fk: ForeignKeyMeta, cell: FocusedCell) => {
+      if (!cell.rowId.startsWith("r")) return;
+      const row = rows[Number(cell.rowId.slice(1))];
+      if (!row) return;
+      const jump = buildReverseJumpFilters(fk, row, columnNames);
+      if (!jump) return;
+      openDataTable(connId, db, fk.table ?? table, jump);
+    },
+    [columnNames, connId, db, rows, table],
   );
 
   const onSelectRow = useCallback((rowId: string, mods: { ctrl: boolean }) => {
@@ -694,6 +723,10 @@ function DataViewInner({
             fkByColumn={fkByColumn}
             fkGroups={fkGroups}
             onGoToReferencedRow={onGoToReferencedRow}
+            referencingFks={refsRequested ? (referencingFks.data ?? null) : undefined}
+            referencingFksLoading={referencingFks.isPending && refsRequested}
+            onRequestReferencingFks={onRequestReferencingFks}
+            onFindReferencingRows={onFindReferencingRows}
             onLoadFkValues={onLoadFkValues}
             onFkPick={onFkPick}
             onColumnResize={(name, width) => {

@@ -27,6 +27,10 @@ export const objKeys = {
   all: (connId: number) => ["obj", connId] as const,
   ddl: (connId: number, db: string, table: string) =>
     [...objKeys.all(connId), "ddl", db, table] as const,
+  foreignKeys: (connId: number, db: string, table: string) =>
+    [...objKeys.all(connId), "fks", db, table] as const,
+  referencingFks: (connId: number, db: string, table: string) =>
+    [...objKeys.all(connId), "referencing-fks", db, table] as const,
   routines: (connId: number, db: string) =>
     [...objKeys.all(connId), "routines", db] as const,
   routineDdl: (connId: number, db: string, name: string, kind: RoutineKind) =>
@@ -68,6 +72,15 @@ export async function fetchForeignKeys(
   table: string,
 ): Promise<ForeignKeyMeta[]> {
   return ipc<ForeignKeyMeta[]>("obj_list_foreign_keys", { connId, db, table });
+}
+
+/** Foreign keys pointing AT a table (reverse view; Phase 10-B navigation). */
+export async function fetchReferencingForeignKeys(
+  connId: number,
+  db: string,
+  table: string,
+): Promise<ForeignKeyMeta[]> {
+  return ipc<ForeignKeyMeta[]>("obj_list_referencing_foreign_keys", { connId, db, table });
 }
 
 export function fetchRoutines(connId: number, db: string): Promise<RoutineMeta[]> {
