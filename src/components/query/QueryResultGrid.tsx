@@ -240,7 +240,7 @@ export function QueryResultGrid({
         editingCell={editingCell}
         sortColumn={null}
         sortDirection={null}
-        activeFilter={null}
+        filters={[]}
         isLoading={false}
         readOnly={!editable}
         hideFilterRow

@@ -32,6 +32,11 @@ import { openExportDialog } from "@/stores/export-dialog";
 import { openImportWizard } from "@/stores/import-dialog";
 import { getChangeset, useChangesetStore } from "@/stores/changesets";
 import { fetchForeignKeys } from "@/lib/object-queries";
+import {
+  buildForwardJumpFilters,
+  fkGroupsByColumn,
+} from "@/lib/fk-navigation";
+import { openDataTable } from "@/stores/tabs";
 import { parseTsvRows, tsvCellToRowValue } from "@/lib/tsv-paste";
 import type { Tab } from "@/stores/tabs";
 import { useUiStore } from "@/stores/ui";
@@ -60,7 +65,8 @@ export function DataView({ tab }: { tab: Tab }) {
     connId?: unknown;
     db?: unknown;
     table?: unknown;
-    initialFilter?: unknown;
+    initialFilters?: unknown;
+    filterEpoch?: unknown;
   };
   if (
     typeof meta.connId !== "number" ||
@@ -76,14 +82,17 @@ export function DataView({ tab }: { tab: Tab }) {
     );
   }
   return (
+    // The epoch suffix remounts the view when a jump re-seeds the SAME tab
+    // with new initialFilters (openDataTable bumps it); pending changesets
+    // live in a module store keyed by tab id and survive the remount.
     <DataViewInner
-      key={`${tab.id}`}
+      key={`${tab.id}:${meta.filterEpoch ?? 0}`}
       tabId={tab.id}
       connId={meta.connId}
       db={meta.db}
       table={meta.table}
-      initialFilter={
-        isFilterSpec(meta.initialFilter) ? meta.initialFilter : null
+      initialFilters={
+        isFilterSpecArray(meta.initialFilters) ? meta.initialFilters : []
       }
     />
   );
@@ -98,25 +107,29 @@ function isFilterSpec(value: unknown): value is FilterSpec {
   );
 }
 
+function isFilterSpecArray(value: unknown): value is FilterSpec[] {
+  return Array.isArray(value) && value.every(isFilterSpec);
+}
+
 function DataViewInner({
   tabId,
   connId,
   db,
   table,
-  initialFilter = null,
+  initialFilters = [],
 }: {
   tabId: string;
   connId: number;
   db: string;
   table: string;
-  /** Seeded from tab meta (e.g. find-text jump-to-row). */
-  initialFilter?: FilterSpec | null;
+  /** Seeded from tab meta (FK jumps, find-text jump-to-row). */
+  initialFilters?: FilterSpec[];
 }) {
   // -- paging / view state --------------------------------------------------
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [offset, setOffset] = useState(0);
   const [orderBy, setOrderBy] = useState<SortSpec[]>([]);
-  const [filter, setFilter] = useState<FilterSpec | null>(initialFilter);
+  const [filters, setFilters] = useState<FilterSpec[]>(initialFilters);
   const [nonce, setNonce] = useState(0);
   const [pages, setPages] = useState<PageResult[]>([]);
   const [widthOverrides, setWidthOverrides] = useState<Record<string, number>>({});
@@ -141,8 +154,8 @@ function DataViewInner({
 
   // -- data -----------------------------------------------------------------
   const params: DataPageParams = useMemo(
-    () => ({ connId, db, table, pageSize, offset, orderBy, filter }),
-    [connId, db, table, pageSize, offset, orderBy, filter],
+    () => ({ connId, db, table, pageSize, offset, orderBy, filters }),
+    [connId, db, table, pageSize, offset, orderBy, filters],
   );
   const inputsRef = useRef(params);
   inputsRef.current = params;
@@ -182,7 +195,7 @@ function DataViewInner({
     setPages([]);
     setOffset(0);
     setSelectedIds(new Set());
-  }, [pageSize, orderBy, filter, nonce]);
+  }, [pageSize, orderBy, filters, nonce]);
 
   // -- derived --------------------------------------------------------------
   const latest = pages[pages.length - 1];
@@ -207,21 +220,28 @@ function DataViewInner({
   );
   const pkColumns: string[] | null = pkNames.length > 0 ? pkNames : null;
 
+  /** Column names in grid order — the coordinate system for FK jumps. */
+  const columnNames = useMemo(() => columnsMeta.map((c) => c.name), [columnsMeta]);
+
   // Foreign keys touching this table → per-column dropdown metadata.
   const foreignKeys = useQuery({
     queryKey: ["data-fk-map", connId, db, table],
     queryFn: () => fetchForeignKeys(connId, db, table),
     staleTime: Number.POSITIVE_INFINITY,
   });
+  const fkGroups = useMemo(
+    () => fkGroupsByColumn(foreignKeys.data ?? [], new Set(columnNames)),
+    [foreignKeys.data, columnNames],
+  );
+  // First-wins view for the cell editor dropdowns (one FK per column).
   const fkByColumn = useMemo(() => {
     const map: Record<string, ForeignKeyMeta> = {};
-    for (const fk of foreignKeys.data ?? []) {
-      for (const col of fk.columns) {
-        if (columnsMeta.some((c) => c.name === col)) map[col] ??= fk;
-      }
+    for (const col of Object.keys(fkGroups)) {
+      const fk = fkGroups[col][0];
+      if (fk) map[col] = fk;
     }
     return map;
-  }, [foreignKeys.data, columnsMeta]);
+  }, [fkGroups]);
 
   // Warn once per table about PK-less editing (full-row matching).
   useEffect(() => {
@@ -261,10 +281,32 @@ function DataViewInner({
     [],
   );
 
-  const onFilterApply = useCallback((f: FilterSpec) => setFilter(f), []);
-  const onFilterClearColumn = useCallback(
-    (column: string) => setFilter((f) => (f?.column === column ? null : f)),
-    [],
+  /**
+   * Filter-row apply: replaces this column's term when one exists, else
+   * appends — other columns' terms stay untouched.
+   */
+  const onFilterApply = useCallback((f: FilterSpec) => {
+    setFilters((prev) =>
+      prev.some((term) => term.column === f.column)
+        ? prev.map((term) => (term.column === f.column ? f : term))
+        : [...prev, f],
+    );
+  }, []);
+  const onFilterClearColumn = useCallback((column: string) => {
+    setFilters((prev) => prev.filter((term) => term.column !== column));
+  }, []);
+
+  /** Jump to the referenced row of a FK cell through a seeded open. */
+  const onGoToReferencedRow = useCallback(
+    (fk: ForeignKeyMeta, cell: FocusedCell) => {
+      if (!cell.rowId.startsWith("r")) return;
+      const row = rows[Number(cell.rowId.slice(1))];
+      if (!row) return;
+      const jump = buildForwardJumpFilters(fk, row, columnNames);
+      if (!jump) return;
+      openDataTable(connId, fk.refDb ?? db, fk.refTable, jump);
+    },
+    [columnNames, connId, db, rows],
   );
 
   const onSelectRow = useCallback((rowId: string, mods: { ctrl: boolean }) => {
@@ -551,10 +593,13 @@ function DataViewInner({
       );
   }, [columnsMeta, tabId]);
 
-  /** Quick filter from the cell context menu replaces the active filter. */
+  /**
+   * Quick filter from the cell context menu REPLACES every active term
+   * (Heidi semantics: a quick filter is a fresh question, not an addition).
+   */
   const onQuickFilter = useCallback(
     (f: FilterSpec) => {
-      setFilter(f);
+      setFilters([f]);
     },
     [],
   );
@@ -574,14 +619,17 @@ function DataViewInner({
         hasMore={hasMore}
         isFetching={query.isFetching}
         selectionCount={selectedIds.size}
-        filter={filter}
+        filters={filters}
         orderBy={orderBy}
         onPageSizeChange={(size) => setPageSize(size)}
         onLoadMore={() => setOffset((o) => o + pageSize)}
         onRefresh={hardReload}
         onAddRow={onAddRow}
         onDeleteSelected={onDeleteSelected}
-        onClearFilter={() => setFilter(null)}
+        onClearFilter={() => setFilters([])}
+        onClearFilterTerm={(index) =>
+          setFilters((prev) => prev.filter((_, i) => i !== index))
+        }
         onHardReload={hardReload}
         onExportGrid={onExportGrid}
         onImportTable={onImportTable}
@@ -613,7 +661,7 @@ function DataViewInner({
             editingCell={editingCell}
             sortColumn={orderBy[0]?.column ?? null}
             sortDirection={orderBy[0]?.direction ?? null}
-            activeFilter={filter}
+            filters={filters}
             isLoading={query.isLoading}
             onSelectRow={onSelectRow}
             onSelectAll={onSelectAll}
@@ -644,6 +692,8 @@ function DataViewInner({
             onCopyAs={onCopyAs}
             copyAsUpdateEnabled={canCopyAsUpdate}
             fkByColumn={fkByColumn}
+            fkGroups={fkGroups}
+            onGoToReferencedRow={onGoToReferencedRow}
             onLoadFkValues={onLoadFkValues}
             onFkPick={onFkPick}
             onColumnResize={(name, width) => {
@@ -669,7 +719,7 @@ function DataViewInner({
               column={distinctColumn}
               onClose={() => setDistinctColumn(null)}
               onApply={(values) =>
-                setFilter({ column: distinctColumn, op: "in", values, value: null })
+                onFilterApply({ column: distinctColumn, op: "in", values, value: null })
               }
             />
           )}
@@ -691,7 +741,7 @@ function sameParams(a: DataPageParams, b: DataPageParams): boolean {
     a.pageSize === b.pageSize &&
     a.offset === b.offset &&
     JSON.stringify(a.orderBy) === JSON.stringify(b.orderBy) &&
-    JSON.stringify(a.filter) === JSON.stringify(b.filter)
+    JSON.stringify(a.filters) === JSON.stringify(b.filters)
   );
 }
 

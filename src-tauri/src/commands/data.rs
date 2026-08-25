@@ -22,7 +22,7 @@ pub async fn data_query_page(
     page_size: Option<u32>,
     offset: Option<u64>,
     order_by: Option<Vec<crate::connections::SortSpec>>,
-    filter: Option<FilterSpec>,
+    filters: Option<Vec<FilterSpec>>,
 ) -> Result<QueryPageResult> {
     let req = crate::connections::QueryPageRequest {
         db,
@@ -30,7 +30,7 @@ pub async fn data_query_page(
         page_size: page_size.unwrap_or(1000),
         offset: offset.unwrap_or(0),
         order_by: order_by.unwrap_or_default(),
-        filter,
+        filters: filters.unwrap_or_default(),
     };
     connections.query_page(conn_id, req).await
 }

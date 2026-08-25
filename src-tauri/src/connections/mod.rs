@@ -284,8 +284,9 @@ pub struct QueryPageRequest {
     pub offset: u64,
     #[serde(default)]
     pub order_by: Vec<SortSpec>,
+    /// AND-combined WHERE terms; an empty list reads the table unfiltered.
     #[serde(default)]
-    pub filter: Option<FilterSpec>,
+    pub filters: Vec<FilterSpec>,
 }
 
 fn default_page_size() -> u32 {

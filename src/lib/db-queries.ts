@@ -59,7 +59,7 @@ export interface DataPageParams {
   pageSize: number;
   offset: number;
   orderBy: SortSpec[];
-  filter: FilterSpec | null;
+  filters: FilterSpec[];
 }
 
 export const dataKeys = {
@@ -70,7 +70,7 @@ export const dataKeys = {
     [
       ...dataKeys.table(params.connId, params.db, params.table),
       "page",
-      { pageSize: params.pageSize, offset: params.offset, orderBy: params.orderBy, filter: params.filter },
+      { pageSize: params.pageSize, offset: params.offset, orderBy: params.orderBy, filters: params.filters },
     ] as const,
 };
 
@@ -82,7 +82,7 @@ export async function fetchDataPage(params: DataPageParams): Promise<QueryPageRe
     pageSize: params.pageSize,
     offset: params.offset,
     orderBy: params.orderBy,
-    filter: params.filter,
+    filters: params.filters,
   });
 }
 

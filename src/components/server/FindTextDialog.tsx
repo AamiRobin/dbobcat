@@ -174,7 +174,7 @@ function FindTextDialogInner({
     if (pkColumn == null || pkValue === null) return;
     // Single-column PK: seed the data tab with an equality filter on the
     // primary key so the grid lands directly on the matched row.
-    openDataTable(connId, m.db, m.table, { column: pkColumn, op: "eq", value: pkValue });
+    openDataTable(connId, m.db, m.table, [{ column: pkColumn, op: "eq", value: pkValue }]);
     log("info", `Opened ${m.db}.${m.table} filtered on ${pkColumn} = ${pkValue}.`);
   }
 

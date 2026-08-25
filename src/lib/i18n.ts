@@ -231,6 +231,11 @@ export const en = {
   "grid.fk.pickValue": "Referenced values",
   "grid.fk.setNull": "Set NULL",
   "grid.fk.empty": "No referenced rows.",
+  "grid.fk.goTo": "Go to",
+  "grid.fk.goToRef": "Referenced row in {table}",
+  "grid.fk.goToComposite": "{table} ({count} columns)",
+  "grid.fk.nullCell": "cell is NULL",
+  "grid.fk.constraint": "{name}",
   "query.editable.postChanges": "Post changes",
   "query.editable.discard": "Discard",
   "query.editable.noTable":

@@ -40,14 +40,14 @@ use crate::connections::script::split_postgres;
 use crate::connections::server_admin;
 use crate::connections::sql::{
     build_change_sql, build_distinct_values_sql, build_order_by_clause, build_where_clause,
-    validate_column,
+    build_where_clause_and, validate_column,
 };
 use crate::connections::traits::{send_chunk, DbConnection};
 use crate::connections::{
     AlterUserRequest, ApplyChangesRequest, ApplyChangesResult, CellAssign, ColumnDef, ColumnMeta,
     CreateTableRequest, CreateUserRequest, DatabaseInfo, DefaultKind, DistinctValue, EventMeta,
-    ExecResult, ForeignKeyMeta, GrantDetail, GrantRequest, IndexKind, IndexMeta, MaintenanceOp,
-    ObjectKind, ProcessInfo, QueryOutcome, QueryPageRequest, QueryPageResult,
+    ExecResult, FilterOp, ForeignKeyMeta, GrantDetail, GrantRequest, IndexKind, IndexMeta,
+    MaintenanceOp, ObjectKind, ProcessInfo, QueryOutcome, QueryPageRequest, QueryPageResult,
     ResolvedConnectionConfig, ResultColumnMeta, RowChange, RowError, RowValue, RowsChunk,
     RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateKind, ShowCreateResult,
     SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TableOptions, TriggerMeta, UserMeta,
@@ -1465,14 +1465,27 @@ impl DbConnection for PgConnection {
             .collect::<Vec<_>>()
             .join(", ");
 
-        let where_clause = build_where_clause(d, &columns, req.filter.as_ref())?;
-        let filter_cast = req.filter.as_ref().and_then(|f| {
-            columns
+        let where_clause = build_where_clause_and(d, &columns, &req.filters)?;
+        // Per-parameter casts: each term's binds carry its own column's type
+        // so AND-combined terms stay independently coercible (`in` expands
+        // into one bind per value; NULL predicates contribute no binds).
+        let mut casts: Vec<Option<String>> = Vec::new();
+        for f in &req.filters {
+            let cast = columns
                 .iter()
                 .find(|c| c.name == f.column)
-                .map(|c| cast_type_for(&c.data_type))
-        });
-        let where_sql = apply_param_casts(&where_clause.sql, |_| filter_cast.clone());
+                .map(|c| cast_type_for(&c.data_type));
+            match f.op {
+                FilterOp::In => {
+                    for _ in 0..f.values.len() {
+                        casts.push(cast.clone());
+                    }
+                }
+                FilterOp::IsNull | FilterOp::IsNotNull => {}
+                _ => casts.push(cast),
+            }
+        }
+        let where_sql = apply_param_casts(&where_clause.sql, |i| casts.get(i).cloned().flatten());
         let order_clause = build_order_by_clause(d, &columns, &req.order_by)?;
 
         let page_size = req.page_size.clamp(1, MAX_PAGE_SIZE);

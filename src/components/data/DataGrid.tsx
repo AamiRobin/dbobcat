@@ -30,6 +30,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { readClipboardText } from "@/lib/db-queries";
+import { buildForwardJumpFilters } from "@/lib/fk-navigation";
 import {
   cellDisplayText,
   cellRawText,
@@ -90,7 +91,8 @@ export interface DataGridProps {
   editingCell: FocusedCell | null;
   sortColumn: string | null;
   sortDirection: "asc" | "desc" | null;
-  activeFilter: FilterSpec | null;
+  /** Active server-side WHERE terms (AND-combined), chip/filter-row state. */
+  filters: FilterSpec[];
   isLoading: boolean;
 
   /**
@@ -114,6 +116,10 @@ export interface DataGridProps {
   copyAsUpdateEnabled?: boolean;
   /** Column name → foreign key it participates in (editor dropdowns). */
   fkByColumn?: Record<string, ForeignKeyMeta>;
+  /** Every FK constraint per column — powers the Go-to submenu. */
+  fkGroups?: Record<string, ForeignKeyMeta[]>;
+  /** Jump to the referenced row of one FK cell (forward navigation). */
+  onGoToReferencedRow?: (fk: ForeignKeyMeta, cell: FocusedCell) => void;
   /** Load referenced values for one FK of this grid's table. */
   onLoadFkValues?: (fkName: string) => Promise<import("@/types/ipc").FkRefValues>;
   /** A FK row was picked; owners map values onto all affected columns. */
@@ -184,6 +190,12 @@ export function DataGrid(props: DataGridProps) {
     [columns],
   );
 
+  /** Column names in display order — FK jumps map cells through it. */
+  const columnNames = useMemo(
+    () => columns.map((c) => c.meta.name),
+    [columns],
+  );
+
   /** Map a combined display index to row identity. */
   const itemAt = useCallback(
     (index: number): { kind: "real"; rowIndex: number; id: string } | { kind: "insert"; row: InsertedRow; id: string } => {
@@ -241,6 +253,18 @@ export function DataGrid(props: DataGridProps) {
           return;
         }
       }
+      // Alt+ArrowRight: jump to the referenced row of the focused FK cell
+      // (first constraint wins). NULL/non-FK cells simply don't navigate.
+      if (e.altKey && e.key === "ArrowRight" && !readOnly) {
+        const cell = props.focusedCell;
+        const col = cell ? props.columns[cell.colIndex] : undefined;
+        const fk = col ? props.fkGroups?.[col.meta.name]?.[0] : undefined;
+        if (cell && fk && cell.rowId.startsWith("r")) {
+          e.preventDefault();
+          props.onGoToReferencedRow?.(fk, cell);
+        }
+        return;
+      }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         if (!props.focusedCell || totalCount === 0) return;
@@ -258,8 +282,9 @@ export function DataGrid(props: DataGridProps) {
   );
 
   const showSkeleton = isLoading && totalCount === 0;
-  const showEmpty = !isLoading && !props.activeFilter && totalCount === 0;
-  const showNoMatch = !isLoading && props.activeFilter !== null && totalCount === 0;
+  const hasFilters = props.filters.length > 0;
+  const showEmpty = !isLoading && !hasFilters && totalCount === 0;
+  const showNoMatch = !isLoading && hasFilters && totalCount === 0;
 
   return (
     <div
@@ -312,7 +337,7 @@ export function DataGrid(props: DataGridProps) {
               <FilterCell
                 key={col.meta.name}
                 column={col}
-                active={props.activeFilter?.column === col.meta.name ? props.activeFilter : null}
+                active={latestTermForColumn(props.filters, col.meta.name)}
                 onApply={(op, value) => props.onFilterApply({ column: col.meta.name, op, value })}
                 onClearActive={() => props.onFilterClearColumn(col.meta.name)}
               />
@@ -334,10 +359,18 @@ export function DataGrid(props: DataGridProps) {
                 rowIndex={item.rowIndex}
                 rowId={item.id}
                 rowData={props.rows[item.rowIndex] ?? []}
+                columnNames={columnNames}
                 {...props}
               />
             ) : (
-              <InsertRow key={vi.key} viStart={vi.start} row={item.row} rowId={item.id} {...props} />
+              <InsertRow
+                key={vi.key}
+                viStart={vi.start}
+                row={item.row}
+                rowId={item.id}
+                columnNames={columnNames}
+                {...props}
+              />
             );
           })}
         </div>
@@ -366,6 +399,17 @@ export function DataGrid(props: DataGridProps) {
 
 function idToIndex(rowId: string, rowCount: number): number {
   return rowId.startsWith("r") ? Number(rowId.slice(1)) : rowCount + Number(rowId.slice(1));
+}
+
+/** Most recent filter term targeting one column (drives the inline row). */
+function latestTermForColumn(
+  filters: FilterSpec[],
+  columnName: string,
+): FilterSpec | null {
+  for (let i = filters.length - 1; i >= 0; i--) {
+    if (filters[i].column === columnName) return filters[i];
+  }
+  return null;
 }
 
 /** True when a cell of this column may enter edit mode at all. */
@@ -557,6 +601,7 @@ type RealRowProps = DataGridProps & {
   rowIndex: number;
   rowId: string;
   rowData: RowValue[];
+  columnNames: string[];
 };
 
 const RealRow = memo(function RealRow({
@@ -564,6 +609,7 @@ const RealRow = memo(function RealRow({
   rowIndex,
   rowId,
   rowData,
+  columnNames,
   tabId,
   selectedIds,
   focusedCell,
@@ -604,6 +650,8 @@ const RealRow = memo(function RealRow({
           rowIndex={rowIndex}
           kind="real"
           baseValue={rowData[colIndex]}
+          rowData={rowData}
+          columnNames={columnNames}
           selected={selected}
           deleted={deleted}
           focused={focusedCol === colIndex}
@@ -624,12 +672,14 @@ type InsertRowProps = DataGridProps & {
   viStart: number;
   row: InsertedRow;
   rowId: string;
+  columnNames: string[];
 };
 
 const InsertRow = memo(function InsertRow({
   viStart,
   row,
   rowId,
+  columnNames,
   tabId,
   selectedIds,
   focusedCell,
@@ -659,6 +709,7 @@ const InsertRow = memo(function InsertRow({
           rowIndex={-1}
           kind="insert"
           baseValue={row.values[col.meta.name]}
+          columnNames={columnNames}
           selected={selected}
           deleted={false}
           focused={focusedCol === colIndex}
@@ -678,7 +729,7 @@ const InsertRow = memo(function InsertRow({
 type CellHandlers = Omit<
   DataGridProps,
   | "tabId" | "columns" | "rows" | "inserts" | "selectedIds" | "focusedCell"
-  | "editingCell" | "sortColumn" | "sortDirection" | "activeFilter" | "isLoading"
+  | "editingCell" | "sortColumn" | "sortDirection" | "filters" | "isLoading"
   | "readOnly" | "emptyLabel"
   | "onSelectAll" | "onClearSelection" | "onCopy"
 >;
@@ -691,6 +742,10 @@ interface GridCellProps {
   rowIndex: number;
   kind: "real" | "insert";
   baseValue: RowValue | undefined;
+  /** Full row values (real rows only) — FK jumps map through it. */
+  rowData?: RowValue[];
+  /** Column names in display order — jump filters index by it. */
+  columnNames: string[];
   selected: boolean;
   deleted: boolean;
   focused: boolean;
@@ -708,6 +763,8 @@ function GridCell({
   rowIndex,
   kind,
   baseValue,
+  rowData,
+  columnNames,
   deleted,
   focused,
   editing,
@@ -860,6 +917,53 @@ function GridCell({
     !columnLocked &&
     handlers.fkByColumn?.[meta.name];
 
+  /**
+   * Go-to submenu: one entry per FK constraint on this column, disabled with
+   * a reason when the cell is NULL (no referenced row exists). Hidden when
+   * the column has no FK or navigation is unavailable.
+   */
+  const goToItems = () => {
+    if (!handlers.onGoToReferencedRow || readOnly || kind !== "real") return null;
+    const groups = handlers.fkGroups?.[meta.name];
+    if (!groups || groups.length === 0) return null;
+    const ambiguous = groups.length > 1;
+    return (
+      <ContextMenuSub>
+        <ContextMenuSubTrigger className="text-xs">
+          {t("grid.fk.goTo")}
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-64">
+          {groups.map((fk) => {
+            const jumpable =
+              rowData !== undefined &&
+              buildForwardJumpFilters(fk, rowData, columnNames) !== null;
+            const label = fk.columns.length > 1
+              ? t("grid.fk.goToComposite", { table: fk.refTable, count: fk.columns.length })
+              : t("grid.fk.goToRef", { table: fk.refTable });
+            return (
+              <ContextMenuItem
+                key={fk.name}
+                className="text-xs"
+                disabled={!jumpable}
+                title={!jumpable ? t("grid.fk.nullCell") : fk.name}
+                onClick={() =>
+                  handlers.onGoToReferencedRow?.(fk, { rowId, colIndex })
+                }
+              >
+                {label}
+                {ambiguous && (
+                  <span className="ml-1 text-muted-foreground">
+                    · {t("grid.fk.constraint", { name: fk.name })}
+                  </span>
+                )}
+              </ContextMenuItem>
+            );
+          })}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+    );
+  };
+
   const menu = (
     <ContextMenuContent>
       <ContextMenuItem
@@ -877,6 +981,7 @@ function GridCell({
         </ContextMenuItem>
       )}
       {quickFilterItems()}
+      {goToItems()}
       {!readOnly && handlers.onPasteRows && (
         <ContextMenuItem className="text-xs" onClick={() => handlers.onPasteRows?.()}>
           {t("grid.pasteRows")}

@@ -105,60 +105,69 @@ pub fn filter_op_is_predicate(op: FilterOp) -> bool {
     matches!(op, FilterOp::IsNull | FilterOp::IsNotNull)
 }
 
-/// Build the `WHERE` clause for an optional single-term filter
-/// (`""` when absent), validating the column and binding the value.
+/// Build the `WHERE` clause AND-ing every filter term (`""` when `filters`
+/// is empty), validating each column against the schema and binding every
+/// value.
 ///
 /// The `in` operator expands [`FilterSpec::values`] into one bound parameter
 /// per item; an empty item list renders `1 = 0` (matches nothing) instead of
-/// invalid `IN ()` syntax.
+/// invalid `IN ()` syntax. Placeholder numbering is shared across terms so
+/// PostgreSQL's `$n` marks ascend correctly through the whole clause.
+pub fn build_where_clause_and(
+    dialect: SqlDialect,
+    columns: &[ColumnMeta],
+    filters: &[FilterSpec],
+) -> Result<BuiltSql> {
+    if filters.is_empty() {
+        return Ok(BuiltSql { sql: String::new(), params: Vec::new() });
+    }
+    let mut marks = Placeholders::new(dialect);
+    let mut parts: Vec<String> = Vec::with_capacity(filters.len());
+    let mut params = Vec::new();
+    for filter in filters {
+        let meta = validate_column(columns, &filter.column)?;
+        let ident = dialect.quote_ident(&meta.name);
+        if filter.op == FilterOp::In {
+            if filter.values.is_empty() {
+                parts.push("1 = 0".into());
+                continue;
+            }
+            let term_marks = filter
+                .values
+                .iter()
+                .map(|_| marks.mark())
+                .collect::<Vec<_>>()
+                .join(", ");
+            parts.push(format!("{ident} IN ({term_marks})"));
+            params.extend(filter.values.iter().map(bind_value));
+            continue;
+        }
+        if filter_op_is_predicate(filter.op) {
+            parts.push(format!("{ident} {}", filter_op_sql(filter.op)));
+            continue;
+        }
+        let mark = marks.mark();
+        parts.push(format!("{ident} {} {mark}", filter_op_sql(filter.op)));
+        params.push(bind_opt(&filter.value));
+    }
+    Ok(BuiltSql {
+        sql: format!(" WHERE {}", parts.join(" AND ")),
+        params,
+    })
+}
+
+/// Build the `WHERE` clause for an optional single-term filter (`""` when
+/// absent). Thin wrapper over [`build_where_clause_and`] kept for the
+/// `count_rows` trait surface.
 pub fn build_where_clause(
     dialect: SqlDialect,
     columns: &[ColumnMeta],
     filter: Option<&FilterSpec>,
 ) -> Result<BuiltSql> {
-    let Some(filter) = filter else {
-        return Ok(BuiltSql { sql: String::new(), params: Vec::new() });
-    };
-    let meta = validate_column(columns, &filter.column)?;
-    if filter.op == FilterOp::In {
-        if filter.values.is_empty() {
-            return Ok(BuiltSql { sql: " WHERE 1 = 0".into(), params: Vec::new() });
-        }
-        let mut marks_gen = Placeholders::new(dialect);
-        let marks = filter
-            .values
-            .iter()
-            .map(|_| marks_gen.mark())
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Ok(BuiltSql {
-            sql: format!(
-                " WHERE {} IN ({marks})",
-                dialect.quote_ident(&meta.name)
-            ),
-            params: filter.values.iter().map(bind_value).collect(),
-        });
+    match filter {
+        Some(f) => build_where_clause_and(dialect, columns, std::slice::from_ref(f)),
+        None => Ok(BuiltSql { sql: String::new(), params: Vec::new() }),
     }
-    if filter_op_is_predicate(filter.op) {
-        return Ok(BuiltSql {
-            sql: format!(
-                " WHERE {} {}",
-                dialect.quote_ident(&meta.name),
-                filter_op_sql(filter.op)
-            ),
-            params: Vec::new(),
-        });
-    }
-    let mut marks = Placeholders::new(dialect);
-    let mark = marks.mark();
-    Ok(BuiltSql {
-        sql: format!(
-            " WHERE {} {} {mark}",
-            dialect.quote_ident(&meta.name),
-            filter_op_sql(filter.op)
-        ),
-        params: vec![bind_opt(&filter.value)],
-    })
 }
 
 /// Build a WHERE predicate matching rows by their key cells (PK or full-row
@@ -890,6 +899,91 @@ mod tests {
         .unwrap();
         assert_eq!(built.sql, " WHERE \"score\" IN ($1, $2)");
         assert_eq!(built.params.len(), 2);
+    }
+
+    #[test]
+    fn multi_term_and_builder_joins_and_binds_in_order() {
+        let cols = sample_columns();
+        let built = build_where_clause_and(
+            SqlDialect::Mysql,
+            &cols,
+            &[
+                FilterSpec {
+                    column: "name".into(),
+                    op: FilterOp::In,
+                    value: None,
+                    values: vec![RowValue::Str("a".into()), RowValue::Int(3)],
+                },
+                FilterSpec {
+                    column: "score".into(),
+                    op: FilterOp::Gt,
+                    value: Some("5".into()),
+                    values: Vec::new(),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(built.sql, " WHERE `name` IN (?, ?) AND `score` > ?");
+        assert_eq!(
+            built.params,
+            vec![Value::Bytes(b"a".to_vec()), Value::Int(3), Value::Bytes(b"5".to_vec())]
+        );
+    }
+
+    #[test]
+    fn multi_term_and_builder_empty_list_is_empty_clause() {
+        let built =
+            build_where_clause_and(SqlDialect::Mysql, &sample_columns(), &[]).unwrap();
+        assert_eq!(built.sql, "");
+        assert!(built.params.is_empty());
+    }
+
+    #[test]
+    fn multi_term_and_builder_unknown_column_propagates() {
+        let err = build_where_clause_and(
+            SqlDialect::Mysql,
+            &sample_columns(),
+            &[FilterSpec {
+                column: "nope".into(),
+                op: FilterOp::Eq,
+                value: Some("x".into()),
+                values: Vec::new(),
+            }],
+        );
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn multi_term_and_builder_mixes_predicates_and_pg_numbering() {
+        let cols = sample_columns();
+        // NULL predicates contribute no bound parameters.
+        let built = build_where_clause_and(
+            SqlDialect::Postgres,
+            &cols,
+            &[
+                FilterSpec {
+                    column: "score".into(),
+                    op: FilterOp::IsNull,
+                    value: None,
+                    values: Vec::new(),
+                },
+                FilterSpec {
+                    column: "id".into(),
+                    op: FilterOp::LtE,
+                    value: Some("9".into()),
+                    values: Vec::new(),
+                },
+                FilterSpec {
+                    column: "name".into(),
+                    op: FilterOp::IsNotNull,
+                    value: None,
+                    values: Vec::new(),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(built.sql, " WHERE \"score\" IS NULL AND \"id\" <= $1 AND \"name\" IS NOT NULL");
+        assert_eq!(built.params.len(), 1);
     }
 
     #[test]

@@ -22,6 +22,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Spinner } from "@/components/ui/spinner";
 import { applyDataChanges } from "@/lib/db-queries";
+import { prettyFilterLabel } from "@/lib/fk-navigation";
 import { notify } from "@/lib/toast";
 import { log } from "@/stores/log";
 import {
@@ -52,7 +53,8 @@ export interface DataToolbarProps {
   hasMore: boolean;
   isFetching: boolean;
   selectionCount: number;
-  filter: FilterSpec | null;
+  /** Active AND-combined WHERE terms (one chip per term). */
+  filters: FilterSpec[];
   orderBy: SortSpec[];
   onPageSizeChange: (size: number) => void;
   onLoadMore: () => void;
@@ -60,6 +62,8 @@ export interface DataToolbarProps {
   onAddRow: () => void;
   onDeleteSelected: () => void;
   onClearFilter: () => void;
+  /** Remove a single term (chip ✕). */
+  onClearFilterTerm: (index: number) => void;
   /** Reload from offset 0 (drops accumulated pages) — used after posting. */
   onHardReload: () => void;
   /** Open the export dialog for this grid. */
@@ -192,7 +196,13 @@ export function DataToolbar(props: DataToolbarProps) {
       </Tooltip>
 
       <div className="ml-auto flex items-center gap-1">
-        {props.filter && <FilterChip filter={props.filter} onClear={props.onClearFilter} />}
+        {props.filters.map((filter, index) => (
+          <FilterChip
+            key={`${filter.column}:${index}`}
+            filter={filter}
+            onClear={() => props.onClearFilterTerm(index)}
+          />
+        ))}
         <Select
           value={String(props.pageSize)}
           onValueChange={(v) => props.onPageSizeChange(Number(v))}
@@ -254,10 +264,7 @@ function pruneSucceeded(
 }
 
 function FilterChip({ filter, onClear }: { filter: FilterSpec; onClear: () => void }) {
-  const label =
-    filter.op === "in"
-      ? `${filter.column} IN (${filter.values?.length ?? 0} values)`
-      : `${filter.column} ${filter.op}${filter.value != null ? ` '${filter.value}'` : ""}`;
+  const label = prettyFilterLabel(filter);
   return (
     <button
       type="button"

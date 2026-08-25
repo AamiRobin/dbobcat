@@ -216,7 +216,8 @@ export interface QueryPageRequest {
   pageSize?: number;
   offset?: number;
   orderBy?: SortSpec[];
-  filter?: FilterSpec | null;
+  /** AND-combined WHERE terms; an empty list reads the table unfiltered. */
+  filters: FilterSpec[];
 }
 
 export interface QueryPageResult {

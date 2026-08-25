@@ -118,15 +118,18 @@ export function openTab(type: TabType): Tab {
 
 /**
  * Open (or focus) the Data tab for a specific table. Reuses an existing tab
- * for the same connection + db + table, Heidi-style. `initialFilter` seeds
- * the grid's server-side filter (find-text jump-to-row).
+ * for the same connection + db + table, Heidi-style; re-seeding with new
+ * `initialFilters` overwrites the pending seed and bumps `filterEpoch` so the
+ * grid remounts and picks them up (pending changesets are keyed by tab id and
+ * survive the remount).
  */
 export function openDataTable(
   connId: number,
   db: string,
   table: string,
-  initialFilter?: FilterSpec,
+  initialFilters?: FilterSpec[],
 ): void {
+  const seeded = initialFilters && initialFilters.length > 0 ? initialFilters : undefined;
   // Existence check + activate/create happen in ONE updater so a concurrent
   // mutation between the find and the append can't duplicate or mis-focus.
   useTabsStore.setState((s) => {
@@ -137,14 +140,35 @@ export function openDataTable(
         t.meta.db === db &&
         t.meta.table === table,
     );
-    if (existing) return { activeId: existing.id };
+    if (existing) {
+      if (!seeded) return { activeId: existing.id };
+      const tabs = s.tabs.map((t) =>
+        t.id === existing.id
+          ? {
+              ...t,
+              meta: {
+                ...t.meta,
+                initialFilters: seeded,
+                filterEpoch: ((t.meta.filterEpoch as number | undefined) ?? 0) + 1,
+              },
+            }
+          : t,
+      );
+      return { tabs, activeId: existing.id };
+    }
     const tab: Tab = {
       id: makeId(),
       type: "data",
       title: table,
       icon: ICON_BY_TYPE.data,
       closable: true,
-      meta: { connId, db, table, initialFilter },
+      meta: {
+        connId,
+        db,
+        table,
+        initialFilters: seeded,
+        filterEpoch: seeded ? 1 : 0,
+      },
     };
     return { tabs: [...s.tabs, tab], activeId: tab.id };
   });

@@ -27,7 +27,7 @@ use crate::connections::dialect::SqlDialect;
 use crate::connections::script::split_sqlite;
 use crate::connections::sql::{
     build_change_sql, build_distinct_values_sql, build_order_by_clause, build_page_sql,
-    build_where_clause, validate_column,
+    build_where_clause, build_where_clause_and, validate_column,
 };
 use crate::connections::traits::DbConnection;
 use crate::connections::{
@@ -641,7 +641,7 @@ impl DbConnection for SqliteConnection {
         let d = SqlDialect::Sqlite;
 
         let columns = self.describe_table(&req.db, &req.table).await?;
-        let where_clause = build_where_clause(d, &columns, req.filter.as_ref())?;
+        let where_clause = build_where_clause_and(d, &columns, &req.filters)?;
         let order_clause = build_order_by_clause(d, &columns, &req.order_by)?;
         let page_size = req.page_size.clamp(1, MAX_PAGE_SIZE);
 
