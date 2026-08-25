@@ -28,7 +28,8 @@ use crate::connections::{
     ForeignKeyMeta, GrantDetail, GrantRequest, ProcessInfo, QueryOutcome, QueryPageRequest,
     QueryPageResult, ResolvedConnectionConfig, ResultColumnMeta, RowError, RowValue, RowsChunk,
     RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateKind, ShowCreateResult,
-    SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TriggerMeta, UserMeta,
+    SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TableSchemaData,
+    TriggerMeta, UserMeta,
 };
 use crate::error::{AppError, Result};
 
@@ -78,6 +79,58 @@ pub(crate) fn group_referencing_fks(
                         columns: vec![column],
                         ref_db: None,
                         ref_table: parent_table.to_string(),
+                        ref_columns: vec![ref_column],
+                        on_update,
+                        on_delete,
+                        table: Some(child_table),
+                    },
+                );
+            }
+        }
+    }
+    groups.into_values().collect()
+}
+
+/// One raw schema-wide `KEY_COLUMN_USAGE` row: (constraint name, child
+/// table, child column, referenced column, referenced table, referenced
+/// schema, update rule, delete rule).
+pub(crate) type SchemaFkRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+/// Group raw schema-wide `KEY_COLUMN_USAGE` rows into one [`ForeignKeyMeta`]
+/// per constraint (ER diagram batch loader). Rows arrive ordered by (child
+/// table, constraint name, ordinal position). `ref_db` is kept only when the
+/// parent lives in a DIFFERENT schema than `current_db`; same-schema parents
+/// normalize to `None` like the forward listings do.
+#[allow(clippy::type_complexity)]
+pub(crate) fn group_schema_fks(current_db: &str, rows: Vec<SchemaFkRow>) -> Vec<ForeignKeyMeta> {
+    let mut groups: std::collections::BTreeMap<(String, String), ForeignKeyMeta> =
+        std::collections::BTreeMap::new();
+    for (name, child_table, column, ref_column, ref_table, ref_schema, on_update, on_delete) in rows
+    {
+        let key = (child_table.clone(), name.clone());
+        match groups.get_mut(&key) {
+            Some(fk) => {
+                fk.columns.push(column);
+                fk.ref_columns.push(ref_column);
+            }
+            None => {
+                let ref_db = ref_schema.filter(|db| db != current_db);
+                groups.insert(
+                    key,
+                    ForeignKeyMeta {
+                        name,
+                        columns: vec![column],
+                        ref_db,
+                        ref_table,
                         ref_columns: vec![ref_column],
                         on_update,
                         on_delete,
@@ -1094,6 +1147,76 @@ impl DbConnection for MysqlConnection {
         Ok(group_referencing_fks(table, raw))
     }
 
+    async fn list_schema_columns(&mut self, database: &str) -> Result<Vec<TableSchemaData>> {
+        let rows = run_query(
+            self.conn()?,
+            "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, \
+                    COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT \
+             FROM information_schema.COLUMNS \
+             WHERE TABLE_SCHEMA = ? \
+             ORDER BY TABLE_NAME, ORDINAL_POSITION",
+            Params::Positional(vec![database.into()]),
+        )
+        .await?;
+
+        // Rows arrive ordered by (table, ordinal) so appending keeps each
+        // table's column order; BTreeMap keeps table order deterministic.
+        let mut by_table: std::collections::BTreeMap<String, Vec<ColumnMeta>> =
+            std::collections::BTreeMap::new();
+        for row in &rows {
+            by_table.entry(col_string(row, 0)?).or_default().push(ColumnMeta {
+                name: col_string(row, 1)?,
+                data_type: col_string(row, 2)?,
+                nullable: col_string(row, 3)?.eq_ignore_ascii_case("YES"),
+                key: col_opt_string(row, 4)?.filter(|k| !k.is_empty()),
+                default_value: col_opt_string(row, 5)?,
+                extra: col_opt_string(row, 6)?.filter(|e| !e.is_empty()),
+                comment: col_opt_string(row, 7)?.filter(|c| !c.is_empty()),
+            });
+        }
+        Ok(by_table
+            .into_iter()
+            .map(|(table, columns)| TableSchemaData { table, columns })
+            .collect())
+    }
+
+    async fn list_schema_foreign_keys(&mut self, database: &str) -> Result<Vec<ForeignKeyMeta>> {
+        // Whole-schema mirror of `list_referencing_foreign_keys` minus the
+        // referenced-table filter. PK/unique KEY_COLUMN_USAGE rows (NULL
+        // referenced table) are excluded. Cross-database parents keep their
+        // REFERENCED_TABLE_SCHEMA so the UI can count and skip them.
+        let rows = run_query(
+            self.conn()?,
+            "SELECT kcu.CONSTRAINT_NAME, kcu.TABLE_NAME, kcu.COLUMN_NAME, \
+                    kcu.REFERENCED_COLUMN_NAME, kcu.REFERENCED_TABLE_NAME, \
+                    kcu.REFERENCED_TABLE_SCHEMA, rc.UPDATE_RULE, rc.DELETE_RULE \
+             FROM information_schema.KEY_COLUMN_USAGE kcu \
+             LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc \
+               ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA \
+              AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME \
+             WHERE kcu.CONSTRAINT_SCHEMA = ? \
+               AND kcu.REFERENCED_TABLE_NAME IS NOT NULL \
+             ORDER BY kcu.TABLE_NAME, kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION",
+            Params::Positional(vec![database.into()]),
+        )
+        .await?;
+
+        let mut raw = Vec::with_capacity(rows.len());
+        for row in &rows {
+            raw.push((
+                col_string(row, 0)?,
+                col_string(row, 1)?,
+                col_string(row, 2)?,
+                col_string(row, 3)?,
+                col_string(row, 4)?,
+                col_opt_string(row, 5)?,
+                col_opt_string(row, 6)?,
+                col_opt_string(row, 7)?,
+            ));
+        }
+        Ok(group_schema_fks(database, raw))
+    }
+
     async fn list_routines(&mut self, database: &str) -> Result<Vec<RoutineMeta>> {
         let rows = run_query(
             self.conn()?,
@@ -1720,6 +1843,62 @@ mod tests {
         assert_eq!(shipments.table.as_deref(), Some("shipments"));
         assert_eq!(shipments.columns, vec!["product_code"]);
         assert_eq!(shipments.on_update, None);
+    }
+
+    #[test]
+    fn schema_fk_rows_group_per_constraint_and_normalize_same_db() {
+        let fks = group_schema_fks(
+            "shop",
+            vec![
+                (
+                    "fk_orders_customers".into(),
+                    "orders".into(),
+                    "customer_id".into(),
+                    "id".into(),
+                    "customers".into(),
+                    Some("shop".into()),
+                    Some("NO ACTION".into()),
+                    Some("CASCADE".into()),
+                ),
+                (
+                    "fk_orders_regions".into(),
+                    "orders".into(),
+                    "region_id".into(),
+                    "id".into(),
+                    "regions".into(),
+                    Some("other_db".into()),
+                    None,
+                    None,
+                ),
+                (
+                    "fk_orders_customers".into(),
+                    "orders".into(),
+                    "secondary_id".into(),
+                    "alt_id".into(),
+                    "customers".into(),
+                    Some("shop".into()),
+                    None,
+                    None,
+                ),
+            ],
+        );
+        assert_eq!(fks.len(), 2);
+
+        // BTreeMap order: (child table, constraint name).
+        assert_eq!(fks[0].name, "fk_orders_customers");
+        assert_eq!(fks[0].table.as_deref(), Some("orders"));
+        assert_eq!(fks[0].ref_table, "customers");
+        // Same-schema parent normalizes to None (forward-listing semantics).
+        assert_eq!(fks[0].ref_db, None);
+        assert_eq!(
+            fks[0].columns,
+            vec!["customer_id", "secondary_id"]
+        );
+
+        // Cross-schema parent keeps its schema so the UI can skip the edge.
+        assert_eq!(fks[1].name, "fk_orders_regions");
+        assert_eq!(fks[1].ref_table, "regions");
+        assert_eq!(fks[1].ref_db.as_deref(), Some("other_db"));
     }
 
     #[test]

@@ -12,6 +12,7 @@
 
 pub mod app;
 pub mod data;
+pub mod diagram;
 pub mod export;
 pub mod import;
 pub mod objects;
@@ -108,5 +109,9 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         server::status_list,
         server::find_text_start,
         server::find_text_cancel,
+        // ER diagram (Phase 11)
+        diagram::dia_describe_tables,
+        diagram::dia_list_foreign_keys,
+        diagram::dia_export_file,
     ])
 }

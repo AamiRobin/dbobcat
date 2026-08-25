@@ -106,6 +106,15 @@ impl ColumnMeta {
     }
 }
 
+/// One table's full column list, produced by the whole-schema batch loader
+/// (`dia_describe_tables`). Mirrors `TableSchemaData` in `src/types/ipc.ts`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableSchemaData {
+    pub table: String,
+    pub columns: Vec<ColumnMeta>,
+}
+
 /// Identity + version banner captured at connect time.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

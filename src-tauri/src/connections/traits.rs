@@ -15,7 +15,7 @@ use crate::connections::{
     DatabaseInfo, DistinctValue, EventMeta, ExecResult, FilterSpec, ForeignKeyMeta, GrantDetail,
     GrantRequest, ProcessInfo, QueryOutcome, QueryPageRequest, QueryPageResult,
     ResultColumnMeta, RowValue, RowsChunk, RoutineKind, RoutineMeta, ServerInfo, ServerVariable,
-    ShowCreateResult, StatusVariable, TableDdl, TableMeta, TriggerMeta, UserMeta,
+    ShowCreateResult, StatusVariable, TableDdl, TableMeta, TableSchemaData, TriggerMeta, UserMeta,
 };
 use crate::error::{AppError, Result};
 
@@ -40,6 +40,22 @@ pub trait DbConnection: Send {
         database: &str,
         table: &str,
     ) -> Result<Vec<ColumnMeta>>;
+
+    /// Whole-schema column metadata in one round-trip (ER diagram batch
+    /// load). One entry per table; views are not included.
+    async fn list_schema_columns(&mut self, database: &str) -> Result<Vec<TableSchemaData>> {
+        let _ = database;
+        Err(unsupported())
+    }
+
+    /// Every foreign key of one schema in one round-trip (ER diagram edges).
+    /// Each entry describes the CHILD constraint — `columns` are the child's
+    /// FK columns, `ref_table` the referenced parent and `table` the child
+    /// table the constraint lives on.
+    async fn list_schema_foreign_keys(&mut self, database: &str) -> Result<Vec<ForeignKeyMeta>> {
+        let _ = database;
+        Err(unsupported())
+    }
 
     /// Read one page of table rows for a data tab (sort/filter validated and
     /// applied server-side; see [`QueryPageRequest`]).

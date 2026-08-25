@@ -36,7 +36,7 @@ use crate::connections::{
     IndexKind, IndexMeta, MaintenanceOp, ObjectKind, QueryOutcome, QueryPageRequest,
     QueryPageResult, ResolvedConnectionConfig, ResultColumnMeta, RowError, RowValue, RowsChunk,
     RoutineKind, RoutineMeta, ServerInfo, ShowCreateKind, ShowCreateResult, TableDdl,
-    TableKind, TableMeta, TableOptions, TriggerMeta,
+    TableKind, TableMeta, TableOptions, TableSchemaData, TriggerMeta,
 };
 use crate::error::{AppError, Result};
 
@@ -69,9 +69,17 @@ pub(crate) fn group_lite_referencing_fks(
     parent_table: &str,
     raw: Vec<LiteFkRow>,
 ) -> Vec<ForeignKeyMeta> {
+    debug_assert!(raw.iter().all(|(_, _, ref_table, ..)| ref_table == parent_table));
+    group_lite_fks(raw)
+}
+
+/// Group raw `PRAGMA foreign_key_list` rows into one [`ForeignKeyMeta`] per
+/// (child table, FK id), keeping each row's own referenced table (schema-wide
+/// ER diagram loader; the referencing variant above is a filtered wrapper).
+pub(crate) fn group_lite_fks(raw: Vec<LiteFkRow>) -> Vec<ForeignKeyMeta> {
     let mut groups: std::collections::BTreeMap<(String, i64), ForeignKeyMeta> =
         std::collections::BTreeMap::new();
-    for (child_table, id, _, from_col, to_col, on_update, on_delete) in raw {
+    for (child_table, id, ref_table, from_col, to_col, on_update, on_delete) in raw {
         let key = (child_table.clone(), id);
         match groups.get_mut(&key) {
             Some(fk) => {
@@ -85,7 +93,7 @@ pub(crate) fn group_lite_referencing_fks(
                         name: format!("FK_{id}_{child_table}"),
                         columns: vec![from_col],
                         ref_db: None,
-                        ref_table: parent_table.to_string(),
+                        ref_table,
                         ref_columns: vec![to_col.unwrap_or_default()],
                         on_update: Some(on_update),
                         on_delete: Some(on_delete),
@@ -683,6 +691,102 @@ impl DbConnection for SqliteConnection {
             .map_err(rusqlite_err)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(rusqlite_err)
+    }
+
+    async fn list_schema_columns(&mut self, _database: &str) -> Result<Vec<TableSchemaData>> {
+        let d = SqlDialect::Sqlite;
+        let conn = lock_conn(&self.conn)?;
+        // Base tables only (views have no storage; matches the diagram scope).
+        let mut table_stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master \
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' \
+                 ORDER BY name",
+            )
+            .map_err(rusqlite_err)?;
+        let tables: Vec<String> = table_stmt
+            .query_map([], |row| row.get(0))
+            .map_err(rusqlite_err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(rusqlite_err)?;
+
+        let mut out = Vec::with_capacity(tables.len());
+        for table in tables {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info({})", d.quote_ident(&table)))
+                .map_err(rusqlite_err)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(ColumnMeta {
+                        name: row.get(1)?,
+                        data_type: {
+                            let t: String = row.get(2)?;
+                            if t.is_empty() { "BLOB".to_string() } else { t }
+                        },
+                        nullable: row.get::<_, i64>(3)? == 0,
+                        key: if row.get::<_, i64>(5)? > 0 {
+                            Some("PRI".into())
+                        } else {
+                            None
+                        },
+                        default_value: row.get::<_, Option<String>>(4)?.filter(|v| !v.is_empty()),
+                        extra: None,
+                        comment: None,
+                    })
+                })
+                .map_err(rusqlite_err)?;
+            out.push(TableSchemaData {
+                table,
+                columns: rows
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(rusqlite_err)?,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn list_schema_foreign_keys(&mut self, _database: &str) -> Result<Vec<ForeignKeyMeta>> {
+        let d = SqlDialect::Sqlite;
+        let conn = lock_conn(&self.conn)?;
+        let mut table_stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+            )
+            .map_err(rusqlite_err)?;
+        let tables: Vec<String> = table_stmt
+            .query_map([], |row| row.get(0))
+            .map_err(rusqlite_err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(rusqlite_err)?;
+
+        // Same source as the forward listing: PRAGMA foreign_key_list per
+        // base table, unfiltered — every constraint of the file comes back.
+        let mut raw: Vec<LiteFkRow> = Vec::new();
+        for child in tables {
+            let mut fk_stmt = conn
+                .prepare(&format!(
+                    "PRAGMA foreign_key_list({})",
+                    d.quote_ident(&child)
+                ))
+                .map_err(rusqlite_err)?;
+            let rows = fk_stmt
+                .query_map([], |row| {
+                    Ok((
+                        child.clone(),
+                        row.get(0)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                })
+                .map_err(rusqlite_err)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(rusqlite_err)?;
+            raw.extend(rows);
+        }
+        Ok(group_lite_fks(raw))
     }
 
     async fn query_page(&mut self, req: &QueryPageRequest) -> Result<QueryPageResult> {

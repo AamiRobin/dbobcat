@@ -43,7 +43,7 @@ use crate::connections::{
     FkRefValues, ForeignKeyMeta, GrantDetail, GrantRequest, ProcessInfo, QueryOutcome,
     QueryPageRequest, QueryPageResult, ResolvedConnectionConfig, RowValue, RowsChunk,
     RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateResult, StatusVariable,
-    TableDdl, TableMeta, TriggerMeta, UserMeta,
+    TableDdl, TableMeta, TableSchemaData, TriggerMeta, UserMeta,
 };
 use crate::connections::sql::build_fk_ref_sql;
 use crate::error::{AppError, Result};
@@ -126,6 +126,15 @@ enum ConnectionCommand {
     ListReferencingFks {
         database: String,
         table: String,
+        reply: oneshot::Sender<Result<Vec<ForeignKeyMeta>>>,
+    },
+    // ER diagram batch loaders (Phase 11): whole-schema columns + FKs.
+    ListSchemaColumns {
+        database: String,
+        reply: oneshot::Sender<Result<Vec<TableSchemaData>>>,
+    },
+    ListSchemaForeignKeys {
+        database: String,
         reply: oneshot::Sender<Result<Vec<ForeignKeyMeta>>>,
     },
     ListRoutines {
@@ -796,6 +805,37 @@ impl ConnectionManager {
         .await
     }
 
+    /// Whole-schema column metadata for the ER diagram batch loader.
+    pub async fn list_schema_columns(
+        &self,
+        conn_id: u32,
+        database: &str,
+    ) -> Result<Vec<TableSchemaData>> {
+        let db = database.to_string();
+        self.request(conn_id, move |reply| ConnectionCommand::ListSchemaColumns {
+            database: db,
+            reply,
+        })
+        .await
+    }
+
+    /// Every foreign key of one schema (ER diagram edges).
+    pub async fn list_schema_foreign_keys(
+        &self,
+        conn_id: u32,
+        database: &str,
+    ) -> Result<Vec<ForeignKeyMeta>> {
+        let db = database.to_string();
+        self.request(
+            conn_id,
+            move |reply| ConnectionCommand::ListSchemaForeignKeys {
+                database: db,
+                reply,
+            },
+        )
+        .await
+    }
+
     pub async fn list_routines(&self, conn_id: u32, database: &str) -> Result<Vec<RoutineMeta>> {
         let db = database.to_string();
         self.request(conn_id, move |reply| ConnectionCommand::ListRoutines {
@@ -1236,6 +1276,12 @@ async fn connection_task(
             }
             ConnectionCommand::ListReferencingFks { database, table, reply } => {
                 run_cmd!(reply, driver.list_referencing_foreign_keys(&database, &table));
+            }
+            ConnectionCommand::ListSchemaColumns { database, reply } => {
+                run_cmd!(reply, driver.list_schema_columns(&database));
+            }
+            ConnectionCommand::ListSchemaForeignKeys { database, reply } => {
+                run_cmd!(reply, driver.list_schema_foreign_keys(&database));
             }
             ConnectionCommand::ListRoutines { database, reply } => {
                 run_cmd!(reply, driver.list_routines(&database));

@@ -50,8 +50,8 @@ use crate::connections::{
     MaintenanceOp, ObjectKind, ProcessInfo, QueryOutcome, QueryPageRequest, QueryPageResult,
     ResolvedConnectionConfig, ResultColumnMeta, RowChange, RowError, RowValue, RowsChunk,
     RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateKind, ShowCreateResult,
-    SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TableOptions, TriggerMeta, UserMeta,
-    FilterSpec,
+    SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TableOptions, TableSchemaData,
+    TriggerMeta, UserMeta, FilterSpec,
 };
 use crate::error::{AppError, Result};
 
@@ -245,7 +245,6 @@ impl PgConnection {
             _ => Ok(Vec::new()),
         }
     }
-
     /// Run one SELECT-shaped script statement and build a ResultSet outcome.
     async fn run_script_select(&self, stmt: &str) -> std::result::Result<QueryOutcome, String> {
         let started = std::time::Instant::now();
@@ -616,6 +615,32 @@ pub(crate) fn fk_action_letter(letter: char) -> &'static str {
         'd' => "SET DEFAULT",
         'r' => "RESTRICT",
         _ => "NO ACTION", // 'a' and unknowns
+    }
+}
+
+/// Map one catalog column plus PK membership to the wire [`ColumnMeta`]
+/// (shared by `describe_table` and the ER diagram batch loader).
+fn pg_column_meta(c: &PgColumn, is_pk: bool) -> ColumnMeta {
+    let serial = c
+        .default_expr
+        .as_deref()
+        .map(classify_default)
+        .map(|(_, _, serial)| serial)
+        .unwrap_or(false);
+    let extra = match (serial, c.identity, c.generated) {
+        (_, Some(_), _) => Some("identity".to_string()),
+        (_, _, Some(_)) => Some("generated".to_string()),
+        (true, _, _) => Some("sequence default".to_string()),
+        _ => None,
+    };
+    ColumnMeta {
+        name: c.name.clone(),
+        data_type: c.type_text.clone(),
+        nullable: c.nullable,
+        key: if is_pk { Some("PRI".into()) } else { None },
+        default_value: c.default_expr.clone(),
+        extra,
+        comment: c.comment.clone(),
     }
 }
 
@@ -1418,34 +1443,139 @@ impl DbConnection for PgConnection {
 
         Ok(pg_cols
             .iter()
-            .map(|c| {
-                let serial = c
-                    .default_expr
-                    .as_deref()
-                    .map(classify_default)
-                    .map(|(_, _, serial)| serial)
-                    .unwrap_or(false);
-                let extra = match (serial, c.identity, c.generated) {
-                    (_, Some(_), _) => Some("identity".to_string()),
-                    (_, _, Some(_)) => Some("generated".to_string()),
-                    (true, _, _) => Some("sequence default".to_string()),
-                    _ => None,
-                };
-                ColumnMeta {
-                    name: c.name.clone(),
-                    data_type: c.type_text.clone(),
-                    nullable: c.nullable,
-                    key: if pk.contains(&c.attnum) {
-                        Some("PRI".into())
-                    } else {
-                        None
-                    },
-                    default_value: c.default_expr.clone(),
-                    extra,
-                    comment: c.comment.clone(),
+            .map(|c| pg_column_meta(c, pk.contains(&c.attnum)))
+            .collect())
+    }
+
+    async fn list_schema_columns(&mut self, database: &str) -> Result<Vec<TableSchemaData>> {
+        // Whole-schema mirror of load_columns + pk_attnums joined through
+        // pg_class/pg_namespace (base and partitioned tables only).
+        let rows = self
+            .client
+            .query(
+                "SELECT c.relname, c.oid, a.attname, format_type(a.atttypid, a.atttypmod), \
+                        NOT a.attnotnull, \
+                        pg_get_expr(ad.adbin, ad.adrelid), \
+                        a.attidentity, a.attgenerated, a.attnum, \
+                        col_description(a.attrelid, a.attnum) \
+                 FROM pg_class c \
+                 JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 JOIN pg_attribute a ON a.attrelid = c.oid \
+                  AND a.attnum > 0 AND NOT a.attisdropped \
+                 LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum \
+                 WHERE n.nspname = $1 AND c.relkind IN ('r','p') \
+                 ORDER BY c.relname, a.attnum",
+                &[&database],
+            )
+            .await?;
+
+        // Rows arrive ordered by (table, attnum); PK membership comes from a
+        // second catalog pass keyed by relation OID.
+        let mut by_table: std::collections::BTreeMap<u32, TableSchemaData> =
+            std::collections::BTreeMap::new();
+        let mut attnums: std::collections::HashMap<u32, Vec<i16>> =
+            std::collections::HashMap::new();
+        let mut names: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+        for row in &rows {
+            let relname = r_string(row, 0)?;
+            let oid: u32 = row.try_get(1).map_err(|_| missing(1))?;
+            let col = PgColumn {
+                name: r_string(row, 2)?,
+                type_text: r_string(row, 3)?,
+                nullable: r_bool(row, 4)?,
+                default_expr: r_opt_string(row, 5)?,
+                identity: r_opt_char(row, 6)?,
+                generated: r_opt_char(row, 7)?,
+                attnum: r_i16(row, 8)?,
+                comment: r_opt_string(row, 9)?.filter(|c| !c.is_empty()),
+            };
+            names.entry(oid).or_insert(relname);
+            attnums.entry(oid).or_default().push(col.attnum);
+            by_table
+                .entry(oid)
+                .or_insert_with(|| TableSchemaData {
+                    table: String::new(),
+                    columns: Vec::new(),
+                })
+                .columns
+                .push(pg_column_meta(&col, false));
+        }
+
+        let pk_rows = self
+            .client
+            .query(
+                "SELECT con.conrelid, con.conkey FROM pg_constraint con \
+                 JOIN pg_class c ON c.oid = con.conrelid \
+                 JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE n.nspname = $1 AND con.contype = 'p'",
+                &[&database],
+            )
+            .await?;
+        let mut pks: std::collections::HashMap<u32, Vec<i16>> =
+            std::collections::HashMap::new();
+        for row in &pk_rows {
+            let oid: u32 = row.try_get(0).map_err(|_| missing(0))?;
+            pks.insert(oid, r_vec_i16(row, 1)?);
+        }
+
+        Ok(by_table
+            .into_iter()
+            .map(|(oid, mut data)| {
+                // Flag PK columns by their catalog attnum (dropped columns
+                // leave gaps, so positional indexing would be wrong).
+                let pk = pks.get(&oid).cloned().unwrap_or_default();
+                for (col, attnum) in data.columns.iter_mut().zip(
+                    attnums.remove(&oid).unwrap_or_default(),
+                ) {
+                    if pk.contains(&attnum) {
+                        col.key = Some("PRI".into());
+                    }
                 }
+                data.table = names.remove(&oid).unwrap_or_default();
+                data
             })
             .collect())
+    }
+
+    async fn list_schema_foreign_keys(&mut self, database: &str) -> Result<Vec<ForeignKeyMeta>> {
+        // Whole-schema mirror of the forward FK query minus the conrelid
+        // filter. `table` carries the child; ref_db stays None because PG
+        // cross-database references do not exist (cross-schema ones are
+        // indistinguishable here and resolve within the diagram scope).
+        let fk_rows = self
+            .client
+            .query(
+                "SELECT con.conname, con.confupdtype, con.confdeltype, ct.relname, rt.relname, \
+                        (SELECT array_agg(sa.attname ORDER BY x.ord) \
+                           FROM unnest(con.conkey) WITH ORDINALITY AS x(attnum, ord) \
+                           JOIN pg_attribute sa ON sa.attrelid = con.conrelid AND sa.attnum = x.attnum), \
+                        (SELECT array_agg(ra.attname ORDER BY y.ord) \
+                           FROM unnest(con.confkey) WITH ORDINALITY AS y(attnum, ord) \
+                           JOIN pg_attribute ra ON ra.attrelid = con.confrelid AND ra.attnum = y.attnum) \
+                 FROM pg_constraint con \
+                 JOIN pg_class ct ON ct.oid = con.conrelid \
+                 JOIN pg_namespace cn ON cn.oid = ct.relnamespace \
+                 JOIN pg_class rt ON rt.oid = con.confrelid \
+                 WHERE cn.nspname = $1 AND con.contype = 'f' \
+                 ORDER BY ct.relname, con.conname",
+                &[&database],
+            )
+            .await?;
+
+        let mut foreign_keys: Vec<ForeignKeyMeta> = Vec::new();
+        for row in &fk_rows {
+            foreign_keys.push(ForeignKeyMeta {
+                name: r_string(row, 0)?,
+                columns: r_vec_string(row, 5)?,
+                ref_db: None,
+                ref_table: r_string(row, 4)?,
+                ref_columns: r_vec_string(row, 6)?,
+                on_update: Some(fk_action_letter(r_opt_char(row, 1)?.unwrap_or('a')).to_string()),
+                on_delete: Some(fk_action_letter(r_opt_char(row, 2)?.unwrap_or('a')).to_string()),
+                table: Some(r_string(row, 3)?),
+            });
+        }
+        Ok(foreign_keys)
     }
 
     async fn query_page(&mut self, req: &QueryPageRequest) -> Result<QueryPageResult> {
