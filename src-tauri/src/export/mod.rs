@@ -162,20 +162,24 @@ impl CancelToken {
     }
 }
 
+/// Lock helper: recover the inner guard instead of panicking when another
+/// thread panicked while holding the registry. The map itself stays valid
+/// (plain insert/remove), so poisoning costs nothing here.
+fn lock_cancel_map() -> std::sync::MutexGuard<'static, HashMap<u32, Arc<AtomicBool>>> {
+    cancel_map().lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Register a fresh export run; returns its event id and cancel token.
 pub fn begin_export() -> (u32, CancelToken) {
     let id = NEXT_EXPORT_ID.fetch_add(1, Ordering::Relaxed);
     let token = Arc::new(AtomicBool::new(false));
-    cancel_map()
-        .lock()
-        .expect("cancel registry poisoned")
-        .insert(id, token.clone());
+    lock_cancel_map().insert(id, token.clone());
     (id, CancelToken(token))
 }
 
 /// Flip the flag for `id`; true when a run was actually registered.
 pub fn request_cancel(id: u32) -> bool {
-    match cancel_map().lock().expect("cancel registry poisoned").get(&id) {
+    match lock_cancel_map().get(&id) {
         Some(flag) => {
             flag.store(true, Ordering::Relaxed);
             true
@@ -187,7 +191,7 @@ pub fn request_cancel(id: u32) -> bool {
 /// Forget a finished run's token. Shared by the Phase 7 find-text scanner,
 /// which reuses this registry (and its id space) for cancellation.
 pub fn end_export(id: u32) {
-    cancel_map().lock().expect("cancel registry poisoned").remove(&id);
+    lock_cancel_map().remove(&id);
 }
 
 // ---------------------------------------------------------------------------

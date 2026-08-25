@@ -57,11 +57,13 @@ impl LaunchIntentState {
     }
 
     pub fn set(&self, intent: LaunchIntent) {
-        *self.0.lock().expect("launch intent mutex poisoned") = Some(intent);
+        // Recover the guard rather than panicking on poison: a panic in a
+        // prior setter leaves the slot consistent (Option is always valid).
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(intent);
     }
 
     pub fn take(&self) -> Option<LaunchIntent> {
-        self.0.lock().expect("launch intent mutex poisoned").take()
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 }
 
@@ -134,7 +136,10 @@ pub fn app_exit(app: tauri::AppHandle) {
 }
 
 /// Read the system clipboard as plain text (grid "paste rows" + quick
-/// filter by clipboard value). Requires the `allow-read-text` capability.
+/// filter by clipboard value). This is an app-defined command that calls
+/// the clipboard plugin's Rust API directly, so it is not gated by the
+/// webview-side capability ACL — that ACL only applies to plugin commands
+/// invoked from JS.
 #[tauri::command]
 pub fn clipboard_read_text(app: tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
