@@ -29,6 +29,9 @@ const QueryView = lazy(() =>
 const DesignerView = lazy(() =>
   import("@/components/designer/DesignerView").then((m) => ({ default: m.DesignerView })),
 );
+const DiagramView = lazy(() =>
+  import("@/components/diagram/DiagramView").then((m) => ({ default: m.DiagramView })),
+);
 const ObjectEditorView = lazy(() =>
   import("@/components/objects/ObjectEditorView").then((m) => ({ default: m.ObjectEditorView })),
 );
@@ -65,6 +68,12 @@ export function TabContent({ tab }: { tab: Tab }) {
       return (
         <Suspense fallback={<LazyFallback />}>
           <DesignerView tab={tab} />
+        </Suspense>
+      );
+    case "diagram":
+      return (
+        <Suspense fallback={<LazyFallback />}>
+          <DiagramView tab={tab} />
         </Suspense>
       );
     case "object":
