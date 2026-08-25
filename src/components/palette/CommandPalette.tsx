@@ -13,6 +13,7 @@ import {
   Info,
   Keyboard,
   Key,
+  Network,
   PlugZap,
   RefreshCw,
   Server,
@@ -135,6 +136,7 @@ const ACTION_ICONS: Record<string, LucideIcon> = {
   download: Download,
   "file-up": FileUp,
   "text-search": TextSearch,
+  network: Network,
   keyboard: Keyboard,
   info: Info,
 };

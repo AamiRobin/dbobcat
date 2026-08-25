@@ -10,6 +10,7 @@ import {
   FileUp,
   Hash,
   Key,
+  Network,
   Pencil,
   Plus,
   RefreshCw,
@@ -63,6 +64,7 @@ import { useConnectionStore } from "@/stores/connection";
 import {
   openDataTable,
   openDesignerTab,
+  openDiagramTab,
   openObjectEditorTab,
 } from "@/stores/tabs";
 import type {
@@ -1202,6 +1204,10 @@ function DatabaseNode({
         onToggle={() => setOpen(!open)}
         menu={
           <>
+            <ContextMenuItem onClick={() => openDiagramTab(connId, name)}>
+              <Network />
+              View ER Diagram
+            </ContextMenuItem>
             <ContextMenuItem onClick={() => openDesignerTab(connId, name)}>
               <Plus />
               Create Table

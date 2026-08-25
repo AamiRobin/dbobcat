@@ -34,6 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { dbKeys, TREE_STALE_TIME } from "@/lib/db-queries";
+import { diaKeys } from "@/lib/diagram-queries";
 import { alterTable, createTable, fetchTableDdl, objKeys } from "@/lib/object-queries";
 import { notify } from "@/lib/toast";
 import { log } from "@/stores/log";
@@ -148,6 +149,8 @@ function DesignerInner({
       log("success", `Table \`${db}\`.\`${draft.table}\` created.`);
       notify.success("toast.table.created", { table: draft.table });
       void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, db) });
+      // Diagram caches (columns + whole-schema FKs) must follow.
+      void queryClient.invalidateQueries({ queryKey: diaKeys.all(connId) });
       return createSql;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -176,6 +179,8 @@ function DesignerInner({
       }
       void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, db) });
       void queryClient.invalidateQueries({ queryKey: objKeys.ddl(connId, db, table!) });
+      // Diagram caches (columns + whole-schema FKs) must follow.
+      void queryClient.invalidateQueries({ queryKey: diaKeys.all(connId) });
       await ddlQuery.refetch();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

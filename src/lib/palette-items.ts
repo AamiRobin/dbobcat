@@ -39,7 +39,7 @@ import { notify } from "@/lib/toast";
 import { useConnectionStore } from "@/stores/connection";
 import { openExportDialog } from "@/stores/export-dialog";
 import { openImportWizard } from "@/stores/import-dialog";
-import { openServerToolTab } from "@/stores/tabs";
+import { openDiagramTab, openServerToolTab } from "@/stores/tabs";
 import type {
   ColumnMeta,
   DatabaseInfo,
@@ -286,6 +286,31 @@ export function buildActionItems(ctx: PaletteActionContext): PaletteActionItem[]
 
   if (ctx.connected && ctx.connId !== null) {
     items.push(
+      {
+        type: "action",
+        id: "action.er-diagram",
+        labelKey: "palette.action.erDiagram",
+        icon: "network",
+        kbd: null,
+        // The diagram is per-database: resolve the dbs first — one db opens
+        // directly, several ask the user to pick one in the tree.
+        run: async () => {
+          const connId = useConnectionStore.getState().connId;
+          if (connId === null) return;
+          try {
+            const dbs = await fetchDatabases(connId);
+            if (dbs.length === 1) {
+              openDiagramTab(connId, dbs[0].name);
+            } else {
+              notify.info(t("palette.action.erDiagramPickDb"));
+            }
+          } catch (err) {
+            notify.error(
+              `ER diagram failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        },
+      },
       {
         type: "action",
         id: "action.export",

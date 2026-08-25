@@ -316,6 +316,8 @@ export const en = {
   "palette.action.import": "Import CSV / text file…",
   "palette.action.findText": "Find text on server",
   "palette.action.erDiagram": "View ER diagram",
+  "palette.action.erDiagramPickDb":
+    "Several databases on this server — pick one in the tree to view its ER diagram.",
   "palette.action.shortcuts": "Keyboard shortcuts",
   "palette.action.about": "About Murmeli",
 
