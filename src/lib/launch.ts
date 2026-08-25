@@ -105,6 +105,6 @@ export function consumeLaunchIntent(): () => void {
     });
 
   return () => {
-    void unlistenIntent.then((fn) => fn());
+    void unlistenIntent.then((fn) => fn()).catch(() => {});
   };
 }

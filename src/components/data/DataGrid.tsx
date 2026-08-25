@@ -5,7 +5,6 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, KeyRound } from "lucide-r
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -170,6 +169,9 @@ export function DataGrid(props: DataGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const totalCount = rows.length + inserts.length;
 
+  /** Fresh selection for keyboard shortcuts without rebuilding the handler. */
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
   const virtualizer = useVirtualizer({
     count: totalCount,
     getScrollElement: () => scrollRef.current,
@@ -219,7 +221,7 @@ export function DataGrid(props: DataGridProps) {
       }
       // Read-only grids keep navigation/copy but drop every editing shortcut.
       if (!readOnly) {
-        if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) {
+        if ((e.key === "Delete" || e.key === "Backspace") && selectedIdsRef.current.size > 0) {
           e.preventDefault();
           props.onDeleteSelected();
           return;
@@ -252,7 +254,7 @@ export function DataGrid(props: DataGridProps) {
         props.onSelectRow(item.id, { ctrl: false });
       }
     },
-    [props, readOnly, selectedIds.size, totalCount, itemAt, rows.length],
+    [props, readOnly, totalCount, itemAt, rows.length],
   );
 
   const showSkeleton = isLoading && totalCount === 0;
@@ -342,11 +344,11 @@ export function DataGrid(props: DataGridProps) {
 
         {/* ---- overlays ---- */}
         {showSkeleton && (
-          <div className="flex flex-col gap-2 absolute inset-x-0 top-0 p-3">
-            {Array.from({ length: 14 }, (_, i) => (
-              <Skeleton key={i} className="h-4" style={{ width: `${88 - (i % 5) * 9}%` }} />
-            ))}
-          </div>
+          <div
+            aria-hidden
+            className="absolute inset-x-0 top-0 animate-pulse rounded-b-md bg-muted/50"
+            style={{ height: HEADER_HEIGHT + FILTER_HEIGHT + 96 }}
+          />
         )}
         {(showEmpty || showNoMatch) && (
           <div className="pointer-events-none absolute inset-x-0 top-16 flex justify-center">
@@ -1089,6 +1091,11 @@ function CellEditorWithFk({
       ref.current?.focus();
       ref.current?.select();
     }
+    // A stale picking flag from a previous editor must never suppress the
+    // blur-commit of a newly mounted one.
+    return () => {
+      pickingRef.current = false;
+    };
   }, [open]);
 
   return (

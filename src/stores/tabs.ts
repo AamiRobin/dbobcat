@@ -71,21 +71,26 @@ function nextTitle(type: TabType, tabs: Tab[]): string {
   return `${label} ${count}`;
 }
 
-export const useTabsStore = create<TabsState>((set, get) => ({
+export const useTabsStore = create<TabsState>((set) => ({
   tabs: [],
   activeId: null,
 
   openTab: (type, opts) => {
-    const tab: Tab = {
+    const base = {
       id: makeId(),
       type,
-      title: opts?.title ?? nextTitle(type, get().tabs),
       icon: opts?.icon ?? ICON_BY_TYPE[type],
       closable: true,
       meta: opts?.meta ?? {},
     };
-    set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
-    return tab;
+    // Title derives INSIDE the updater from pending state so interleaved
+    // opens can never mint duplicate ordinals off a stale snapshot.
+    let created: Tab = { ...base, title: opts?.title ?? "" };
+    set((s) => {
+      created = { ...base, title: opts?.title ?? nextTitle(type, s.tabs) };
+      return { tabs: [...s.tabs, created], activeId: created.id };
+    });
+    return created;
   },
 
   closeTab: (id) =>
@@ -122,21 +127,26 @@ export function openDataTable(
   table: string,
   initialFilter?: FilterSpec,
 ): void {
-  const state = useTabsStore.getState();
-  const existing = state.tabs.find(
-    (t) =>
-      t.type === "data" &&
-      t.meta.connId === connId &&
-      t.meta.db === db &&
-      t.meta.table === table,
-  );
-  if (existing) {
-    state.setActive(existing.id);
-    return;
-  }
-  state.openTab("data", {
-    title: table,
-    meta: { connId, db, table, initialFilter },
+  // Existence check + activate/create happen in ONE updater so a concurrent
+  // mutation between the find and the append can't duplicate or mis-focus.
+  useTabsStore.setState((s) => {
+    const existing = s.tabs.find(
+      (t) =>
+        t.type === "data" &&
+        t.meta.connId === connId &&
+        t.meta.db === db &&
+        t.meta.table === table,
+    );
+    if (existing) return { activeId: existing.id };
+    const tab: Tab = {
+      id: makeId(),
+      type: "data",
+      title: table,
+      icon: ICON_BY_TYPE.data,
+      closable: true,
+      meta: { connId, db, table, initialFilter },
+    };
+    return { tabs: [...s.tabs, tab], activeId: tab.id };
   });
 }
 
@@ -148,15 +158,21 @@ export function openServerToolTab(
   connId: number,
   tool: "users" | "processes" | "variables",
 ): void {
-  const state = useTabsStore.getState();
-  const existing = state.tabs.find(
-    (t) => t.type === tool && t.meta.connId === connId,
-  );
-  if (existing) {
-    state.setActive(existing.id);
-    return;
-  }
-  state.openTab(tool, { meta: { connId } });
+  useTabsStore.setState((s) => {
+    const existing = s.tabs.find(
+      (t) => t.type === tool && t.meta.connId === connId,
+    );
+    if (existing) return { activeId: existing.id };
+    const tab: Tab = {
+      id: makeId(),
+      type: tool,
+      title: nextTitle(tool, s.tabs),
+      icon: ICON_BY_TYPE[tool],
+      closable: true,
+      meta: { connId },
+    };
+    return { tabs: [...s.tabs, tab], activeId: tab.id };
+  });
 }
 
 /**
@@ -169,22 +185,24 @@ export function openDesignerTab(
   db: string,
   table?: string,
 ): void {
-  const state = useTabsStore.getState();
-  const existing = state.tabs.find(
-    (t) =>
-      t.type === "designer" &&
-      t.meta.connId === connId &&
-      t.meta.db === db &&
-      t.meta.table === table,
-  );
-  if (existing) {
-    state.setActive(existing.id);
-    return;
-  }
-  state.openTab("designer", {
-    title: table ?? "New table",
-    icon: "workflow",
-    meta: { connId, db, table },
+  useTabsStore.setState((s) => {
+    const existing = s.tabs.find(
+      (t) =>
+        t.type === "designer" &&
+        t.meta.connId === connId &&
+        t.meta.db === db &&
+        t.meta.table === table,
+    );
+    if (existing) return { activeId: existing.id };
+    const tab: Tab = {
+      id: makeId(),
+      type: "designer",
+      title: table ?? "New table",
+      icon: "workflow",
+      closable: true,
+      meta: { connId, db, table },
+    };
+    return { tabs: [...s.tabs, tab], activeId: tab.id };
   });
 }
 
@@ -200,25 +218,28 @@ export function openObjectEditorTab(opts: {
   routineKind?: RoutineKind;
   mode?: "edit" | "create";
 }): void {
-  const state = useTabsStore.getState();
   const name = opts.name;
-  const existing = state.tabs.find(
-    (t) =>
-      t.type === "object" &&
-      t.meta.connId === opts.connId &&
-      t.meta.db === opts.db &&
-      t.meta.kind === opts.kind &&
-      t.meta.name === name &&
-      t.meta.mode === (opts.mode ?? "edit"),
-  );
-  if (existing && opts.mode !== "create") {
-    state.setActive(existing.id);
-    return;
-  }
-  state.openTab("object", {
-    title: name ?? `New ${opts.kind}`,
-    icon: iconKeyForObject(opts),
-    meta: { ...opts, mode: opts.mode ?? "edit" },
+  useTabsStore.setState((s) => {
+    const existing = s.tabs.find(
+      (t) =>
+        t.type === "object" &&
+        t.meta.connId === opts.connId &&
+        t.meta.db === opts.db &&
+        t.meta.kind === opts.kind &&
+        t.meta.name === name &&
+        t.meta.mode === (opts.mode ?? "edit"),
+    );
+    // Create-mode always opens a fresh editor, Heidi-style.
+    if (existing && opts.mode !== "create") return { activeId: existing.id };
+    const tab: Tab = {
+      id: makeId(),
+      type: "object",
+      title: name ?? `New ${opts.kind}`,
+      icon: iconKeyForObject(opts),
+      closable: true,
+      meta: { ...opts, mode: opts.mode ?? "edit" },
+    };
+    return { tabs: [...s.tabs, tab], activeId: tab.id };
   });
 }
 

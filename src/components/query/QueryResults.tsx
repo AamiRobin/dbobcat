@@ -48,18 +48,18 @@ export function QueryResults({
     resultSetIndexes.length > 0 ? `res-${resultSetIndexes[0]}` : "messages",
   );
 
-  // A new run resets focus: first result set if any, else messages.
+  // A new run resets focus: first result set if any, else messages. Also
+  // re-syncs when the result-set count changes without a nonce bump (e.g.
+  // streaming outcomes arriving), so a dangling res-N value can't persist.
+  const firstResultSet = resultSetIndexes.length > 0 ? `res-${resultSetIndexes[0]}` : "messages";
   useEffect(() => {
-    setActiveTab(resultSetIndexes.length > 0 ? `res-${resultSetIndexes[0]}` : "messages");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runNonce]);
+    setActiveTab(firstResultSet);
+  }, [runNonce, firstResultSet]);
 
-  // Report the active result set so parents can export exactly what is shown.
   useEffect(() => {
     const match = /^res-(\d+)$/.exec(activeTab);
     onActiveResultSetChange?.(match ? Number(match[1]) : null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [activeTab, onActiveResultSetChange]);
 
   const errorCount = outcomes.filter((o) => o.kind === "error").length;
 

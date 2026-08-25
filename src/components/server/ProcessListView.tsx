@@ -52,10 +52,13 @@ function ProcessListInner({ connId }: { connId: number }) {
 
   // Pause polling when the tab or window is not visible.
   useEffect(() => {
+    // Keyed on connId: if this instance is reused for another connection the
+    // listener must be torn down and re-registered (polling target changes).
     const onVisibility = () => setHidden(document.visibilityState === "hidden");
+    setHidden(false);
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, []);
+  }, [connId]);
 
   const enabled = intervalKey !== "off" && !hidden;
   const processes = useQuery({

@@ -43,6 +43,7 @@ export const EMPTY_QUERY_TAB: QueryTabState = {
 
 interface QueryEditorState {
   byTab: Record<string, QueryTabState>;
+  /** Read-and-patch in one updater — never read a stale snapshot then set. */
   patch: (tabId: string, partial: Partial<QueryTabState>) => void;
   stateFor: (tabId: string) => QueryTabState;
   clearTab: (tabId: string) => void;

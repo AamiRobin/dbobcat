@@ -120,6 +120,8 @@ function DataViewInner({
   const [nonce, setNonce] = useState(0);
   const [pages, setPages] = useState<PageResult[]>([]);
   const [widthOverrides, setWidthOverrides] = useState<Record<string, number>>({});
+  const widthOverridesRef = useRef<Record<string, number>>({});
+  widthOverridesRef.current = widthOverrides;
 
   // -- selection / editing --------------------------------------------------
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -644,12 +646,17 @@ function DataViewInner({
             fkByColumn={fkByColumn}
             onLoadFkValues={onLoadFkValues}
             onFkPick={onFkPick}
-            onColumnResize={(name, width) =>
-              setWidthOverrides((prev) => ({ ...prev, [name]: width }))
-            }
-            onColumnResizeCommit={(name, width) => {
+            onColumnResize={(name, width) => {
+              widthOverridesRef.current = { ...widthOverridesRef.current, [name]: width };
               setWidthOverrides((prev) => ({ ...prev, [name]: width }));
-              persistWidths(db, table, { ...widthOverrides, [name]: width });
+            }}
+            onColumnResizeCommit={(name, width) => {
+              // Merge against the authoritative ref so concurrent commits
+              // can't clobber each other with a stale closure snapshot.
+              const merged = { ...widthOverridesRef.current, [name]: width };
+              widthOverridesRef.current = merged;
+              setWidthOverrides(merged);
+              persistWidths(db, table, merged);
             }}
             onViewBlob={(v) => setBlobValue(v)}
           />

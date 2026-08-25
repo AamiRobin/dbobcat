@@ -41,7 +41,8 @@ export function persistTabsNow(): void {
   const storage = getStorage();
   if (!storage) return;
   try {
-    const { tabs, activeId } = useTabsStore.getState();
+    const tabsState = useTabsStore.getState();
+    const { tabs, activeId } = tabsState;
     const editor = useQueryEditorStore.getState().byTab;
     const payload: PersistedSession = {
       version: 1,

@@ -61,6 +61,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     const previousId = get().connId;
     if (previousId !== null) {
       await get().disconnect();
+      // disconnect() awaits IPC; another action may have raced us and
+      // (re)connected in between. Bail instead of clobbering its connId.
+      if (get().connId !== null) return false;
     }
 
     set({ status: "connecting", link: "ok", error: null });
@@ -132,7 +135,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
  * query for that connection is invalidated so tree/schema/data refetch on
  * their next use.
  */
-export async function installConnStatusListener(): Promise<() => void> {
+export function installConnStatusListener(): Promise<() => void> {
+  // onBackendEvent resolves to the REAL unlisten handle — return that
+  // promise directly so callers can actually clean up.
   return onBackendEvent<ConnStatusEvent>("connection://status", (event) => {
     const { connId, status, message } = event;
     if (useConnectionStore.getState().connId !== connId) return;

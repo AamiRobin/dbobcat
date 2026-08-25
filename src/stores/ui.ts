@@ -73,8 +73,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
 
   setTheme: (theme) => {
-    applyTheme(theme);
+    // Commit store state first so subscribers observe the new value in the
+    // same tick; DOM/localStorage application follows as a pure side effect.
     set({ theme });
+    applyTheme(theme);
   },
 
   toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),

@@ -98,15 +98,17 @@ export function QueryResultGrid({
     [columnsMeta, widthOverrides],
   );
 
-  const resultNames = new Set(result.columns.map((c) => c.name));
+  const resultNames = useMemo(
+    () => new Set(result.columns.map((c) => c.name)),
+    [result.columns],
+  );
   const pkCols = useMemo(
     () => (described.data ? primaryKeyColumns(described.data) : []),
     [described.data],
   );
   const pkInResult = useMemo(
     () => pkCols.filter((c) => resultNames.has(c.name)).map((c) => c.name),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pkCols],
+    [pkCols, resultNames],
   );
 
   const editable =
@@ -122,8 +124,7 @@ export function QueryResultGrid({
   const editableColumns = useMemo(() => {
     if (!editable || !described.data) return null;
     return new Set(described.data.map((c) => c.name).filter((n) => resultNames.has(n)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editable, described.data]);
+  }, [editable, described.data, resultNames]);
 
   const changesetKey = queryChangesetKey(tabId, resultIndex);
   const changeset = useChangesetStore((s) => s.byTab[changesetKey]);

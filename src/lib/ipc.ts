@@ -33,6 +33,15 @@ export class IpcError extends Error {
  * @example
  * const databases = await ipc<DatabaseInfo[]>("db_list_databases", { connId });
  */
+/** Stringify a rejection value; circular/exotic payloads fall back to String(). */
+function safeStringify(raw: unknown): string {
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return String(raw);
+  }
+}
+
 export async function ipc<T>(
   command: IpcCommand,
   args?: Record<string, unknown>,
@@ -46,7 +55,7 @@ export async function ipc<T>(
         ? raw
         : raw instanceof Error
           ? raw.message
-          : JSON.stringify(raw);
+          : safeStringify(raw);
     throw new IpcError(command, message);
   }
 }

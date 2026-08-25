@@ -155,8 +155,10 @@ export function renameTable(
   db: string,
   table: string,
   newName: string,
+  /** Target database for MySQL cross-schema renames; omit = same schema. */
+  newDb?: string,
 ): Promise<void> {
-  return ipc<void>("obj_rename_table", { connId, db, table, newName });
+  return ipc<void>("obj_rename_table", { connId, db, table, newName, newDb });
 }
 
 export function emptyCloneTable(

@@ -153,7 +153,11 @@ export const useChangesetStore = create<ChangesetsState>((set) => ({
 // ---------------------------------------------------------------------------
 
 export function getChangeset(tabId: string): GridChangeset {
-  return useChangesetStore.getState().byTab[tabId] ?? EMPTY_CHANGESET;
+  const cs = useChangesetStore.getState().byTab[tabId];
+  if (cs) return cs;
+  // Clone: EMPTY_CHANGESET is a shared singleton; handing out its live Set
+  // would let one caller's mutation leak into every future empty read.
+  return { updates: {}, inserts: [], deletes: new Set<number>() };
 }
 
 /**
@@ -246,7 +250,9 @@ function keyPredicate(
 ): CellAssign[] {
   return keyCols.flatMap((name) => {
     const idx = columns.findIndex((c) => c.name === name);
-    return idx >= 0 && row[idx]
+    // `!== undefined`, not truthiness: a legitimate PK value of 0 or ""
+    // must still produce a key cell.
+    return idx >= 0 && row[idx] !== undefined
       ? [{ column: name, value: row[idx] }]
       : [];
   });
