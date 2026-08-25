@@ -7,7 +7,8 @@
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
+
 
 use crate::connections::manager::{
     open_driver, ConnectionManager, ConnectOptions,
@@ -73,6 +74,36 @@ pub struct TestResult {
 // Settings helpers
 // ---------------------------------------------------------------------------
 
+/// Credential-store entry id for a session's SSH *key passphrase*.
+fn key_entry_id(session_id: &str) -> String {
+    format!("{session_id}#key")
+}
+
+/// Best-effort one-time migration: settings.json written by older versions
+/// may still carry a plaintext SSH key passphrase inside `ssh.auth`. Move any
+/// such secret into the credential store (`<id>#key`) and strip it from the
+/// in-memory copy so the next `write_sessions` persists `passphrase: null`.
+/// Returns true when at least one profile was scrubbed.
+///
+/// On a credential-store failure the plaintext is kept so the secret is not
+/// lost; migration simply retries on the next session list.
+fn migrate_plaintext_passphrases(
+    sessions: &mut [SavedSession],
+    credentials: &CredentialStore,
+) -> bool {
+    let mut migrated = false;
+    for session in sessions.iter_mut() {
+        let Some(ssh) = session.ssh.as_mut() else { continue };
+        let SshAuth::Key { passphrase, .. } = &mut ssh.auth else { continue };
+        let Some(pw) = passphrase.clone().filter(|p| !p.is_empty()) else { continue };
+        if credentials.save_password(&key_entry_id(&session.id), &pw, None).is_ok() {
+            *passphrase = None;
+            migrated = true;
+        }
+    }
+    migrated
+}
+
 fn read_sessions(app: &AppHandle) -> Result<Vec<SavedSession>> {
     match settings::get_setting(app, SESSIONS_KEY) {
         None => Ok(Vec::new()),
@@ -129,14 +160,22 @@ fn resolve_config(
             .ssh
             .clone()
             .ok_or_else(|| AppError::Config("SSH tunnel enabled but not configured".into()))?;
-        if let SshAuth::Password { .. } = ssh_cfg.auth {
-            let stored = match ssh_password_override {
-                Some(p) => (!p.is_empty()).then(|| p.to_string()),
-                None => credentials.get_password(&ssh_entry_id(&session.id), None)?,
-            };
-            ssh_cfg.auth = SshAuth::Password {
-                password: stored.unwrap_or_default(),
-            };
+        match &mut ssh_cfg.auth {
+            SshAuth::Password { .. } => {
+                let stored = match ssh_password_override {
+                    Some(p) => (!p.is_empty()).then(|| p.to_string()),
+                    None => credentials.get_password(&ssh_entry_id(&session.id), None)?,
+                };
+                ssh_cfg.auth = SshAuth::Password {
+                    password: stored.unwrap_or_default(),
+                };
+            }
+            // Key passphrases are persisted in the credential store under
+            // `<id>#key`; inject the stored one before authenticating.
+            SshAuth::Key { passphrase, .. } if passphrase.is_none() => {
+                *passphrase = credentials.get_password(&key_entry_id(&session.id), None)?;
+            }
+            SshAuth::Key { .. } => {}
         }
         Some(ssh_cfg)
     } else {
@@ -204,22 +243,48 @@ pub fn session_list(app: AppHandle) -> Result<Vec<SavedSession>> {
 }
 
 /// Non-command helper shared with the launch-intent resolver (`commands/app.rs`).
+///
+/// Also runs the best-effort plaintext-passphrase migration (see
+/// [`migrate_plaintext_passphrases`]): legacy settings.json entries are moved
+/// into the credential store immediately and re-persisted scrubbed.
 pub fn session_list_impl(app: &AppHandle) -> Result<Vec<SavedSession>> {
-    read_sessions(app)
+    let mut sessions = read_sessions(app)?;
+    if let Some(credentials) = app.try_state::<CredentialStore>() {
+        if migrate_plaintext_passphrases(&mut sessions, &credentials) {
+            write_sessions(app, &sessions)?;
+        }
+    }
+    Ok(sessions)
 }
 
 /// Insert or update a session. Password arguments are optional: `None`
 /// leaves previously stored values untouched.
+///
+/// The SSH *key passphrase* is a secret too: when the editor sends a fresh
+/// one inside `session.ssh.auth` (`Key { .. }`), it is stored in the
+/// credential store under `<id>#key` and stripped from the profile that is
+/// written to settings.json — mirroring how DB/SSH passwords are handled.
 #[tauri::command]
 pub async fn session_save(
     app: AppHandle,
     credentials: State<'_, CredentialStore>,
-    session: SavedSession,
+    mut session: SavedSession,
     password: Option<String>,
     ssh_password: Option<String>,
 ) -> Result<()> {
     if session.name.trim().is_empty() {
         return Err(AppError::Config("session name must not be empty".into()));
+    }
+
+    // Persist the key passphrase (if freshly supplied) and strip it from the
+    // struct BEFORE write_sessions so no secret reaches settings.json.
+    if let Some(SshAuth::Key { passphrase, .. }) = session.ssh.as_mut().map(|s| &mut s.auth) {
+        match passphrase.take() {
+            Some(pw) if !pw.is_empty() => {
+                credentials.save_password(&key_entry_id(&session.id), &pw, None)?;
+            }
+            _ => {}
+        }
     }
 
     let mut sessions = read_sessions(&app)?;
@@ -251,6 +316,7 @@ pub async fn session_delete(
 
     credentials.delete_password(&session_id, None)?;
     credentials.delete_password(&ssh_entry_id(&session_id), None)?;
+    credentials.delete_password(&key_entry_id(&session_id), None)?;
     Ok(())
 }
 

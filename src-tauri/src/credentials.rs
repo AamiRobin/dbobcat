@@ -26,6 +26,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key};
@@ -58,22 +59,26 @@ fn default_store_path() -> Result<PathBuf> {
 
 type EntryMap = HashMap<String, String>;
 
-/// Credential store handle. Cheap to clone conceptually; all state lives on
-/// disk so concurrent commands always observe the latest persisted contents.
+/// Credential store handle. All state lives on disk; an internal mutex
+/// serializes the read-decrypt-mutate-write cycle so concurrent Tauri
+/// commands cannot interleave and silently drop each other's updates.
 pub struct CredentialStore {
     path: PathBuf,
+    /// Guards one full update cycle; contents are irrelevant.
+    write_lock: Mutex<()>,
 }
 
 impl CredentialStore {
-    /// Open the store at `path`. The file itself is created lazily on the
-    /// first write so a store can start directly in master-password mode.
     pub fn load(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+            create_private_dir(parent)
                 .map_err(|e| AppError::Config(format!("cannot create data directory: {e}")))?;
         }
-        Ok(Self { path })
+        Ok(Self {
+            path,
+            write_lock: Mutex::new(()),
+        })
     }
 
     /// Open the store at the default platform location.
@@ -119,6 +124,15 @@ impl CredentialStore {
         master: Option<&str>,
         mutate: impl FnOnce(&mut EntryMap),
     ) -> Result<()> {
+        // Serialize the whole read-decrypt-mutate-write cycle: two concurrent
+        // commands would otherwise both read the same base blob and the
+        // second write would silently discard the first update.
+        let _guard = self
+            .write_lock
+            .lock()
+            // Poison recovery is safe: nothing inside the critical section
+            // can leave shared state inconsistent (all state is re-derived).
+            .unwrap_or_else(|e| e.into_inner());
         let existing = self.read_raw()?;
         let mut entries = match &existing {
             Some(blob) => decrypt_blob(blob, master)?,
@@ -278,14 +292,50 @@ fn random_bytes(len: usize) -> Vec<u8> {
     buf
 }
 
+/// Create `dir` (recursively) with owner-only permissions on unix; a no-op
+/// permission-wise on Windows where ACLs are inherited instead.
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(dir)?;
+        // 0o700 = rwx------ ; also tightened retroactively for dirs that
+        // already existed with looser umask-derived modes.
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        std::fs::create_dir_all(dir)
+    }
+}
+
+/// Best-effort chmod of a credentials file to owner-only (0600 on unix).
+fn set_private_file_perms(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ =
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
+        create_private_dir(parent)
             .map_err(|e| AppError::Config(format!("cannot create data directory: {e}")))?;
     }
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, bytes)
         .map_err(|e| AppError::Config(format!("cannot write credentials file: {e}")))?;
+    // Restrict before the rename so the final path never exposes wider
+    // permissions, even briefly.
+    set_private_file_perms(&tmp);
     std::fs::rename(&tmp, path)
         .map_err(|e| AppError::Config(format!("cannot finalize credentials file: {e}")))?;
     Ok(())
