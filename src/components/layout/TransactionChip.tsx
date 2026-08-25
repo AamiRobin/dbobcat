@@ -226,7 +226,7 @@ export function TransactionChip() {
             }}
           >
             <SelectTrigger size="sm" className="h-6 w-44 px-2 text-xs">
-              {tx.isolation ? isolationLabel(tx.isolation) : ""}
+              {tx.isolation ? isolationLabel(tx.isolation) : t("session.form.isolation.default")}
             </SelectTrigger>
             <SelectContent>
               {ISOLATION_LEVELS.map((level) => (
