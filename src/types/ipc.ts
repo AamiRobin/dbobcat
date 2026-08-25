@@ -68,6 +68,11 @@ export interface SavedSession {
   comment?: string | null;
   /** Keep-alive ping interval seconds; 0 = off, unset = 20 (server engines). */
   keepAliveSec?: number | null;
+  // Transactions UI Phase 1: per-connection defaults (server engines only).
+  /** Initial transaction mode; null = auto-commit. */
+  txMode?: TxMode | null;
+  /** Session isolation level applied at connect; null = server default. */
+  isolation?: IsolationLevel | null;
 }
 
 /** Outcome of `session_test`; failures are reported inline. */
@@ -105,6 +110,54 @@ export interface ConnInfo {
 export interface ConnStatusEvent {
   connId: number;
   status: "reconnecting" | "reconnected" | "lost";
+  message?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Transaction ledger (Transactions UI Phase 1)
+// ---------------------------------------------------------------------------
+
+/** How the connection treats statements. */
+export type TxMode = "auto" | "manual";
+
+/**
+ * Ledger phase. `aborted` models PostgreSQL's 25P02 state — every further
+ * statement fails until ROLLBACK.
+ */
+export type TxPhase = "idle" | "open" | "aborted";
+
+/** Session transaction isolation level (mirrors `IsolationLevel`). */
+export type IsolationLevel =
+  | "read_uncommitted"
+  | "read_committed"
+  | "repeatable_read"
+  | "serializable";
+
+/** One statement tracked inside the open transaction. */
+export interface TxEntry {
+  /** Source SQL, truncated to ~500 chars for display. */
+  sql: string;
+  rowsAffected: number;
+  /** Wall-clock ms since epoch; rendered as relative time. */
+  startedMs: number;
+  kind: "select" | "dml" | "ddl" | "other";
+}
+
+/** Serializable snapshot of one connection's transaction ledger. */
+export interface TxState {
+  mode: TxMode;
+  phase: TxPhase;
+  isolation?: IsolationLevel | null;
+  /** Uncommitted DML statements currently tracked. */
+  dmlCount: number;
+  entries: TxEntry[];
+}
+
+/** Payload of the `connection://tx` backend event. */
+export interface TxStateEvent {
+  connId: number;
+  state: TxState;
+  /** Optional note, e.g. "open transaction was rolled back by disconnect". */
   message?: string | null;
 }
 
@@ -314,8 +367,16 @@ export type QueryOutcome =
       /** Server info string ("Rows matched: ...") when present. */
       info?: string | null;
       elapsedMs: number;
+      /** Full source statement text (tx ledger bookkeeping). */
+      sql?: string;
     }
-  | { kind: "error"; message: string; sqlSnippet: string };
+  | {
+      kind: "error";
+      message: string;
+      sqlSnippet: string;
+      /** PG 25P02: the failure poisoned an open transaction. */
+      abortedTx?: boolean;
+    };
 
 /** One executed script in the persisted query history (most-recent-first). */
 export interface HistoryEntry {

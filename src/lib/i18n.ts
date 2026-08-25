@@ -49,6 +49,31 @@ export const en = {
   "status.reconnecting": "Reconnecting…",
   "status.linkLost": "Connection lost",
 
+  // Transaction chip + ledger popover (Transactions UI Phase 1)
+  "tx.chip.auto": "Auto",
+  "tx.chip.manualIdle": "Manual",
+  "tx.chip.manualOpen": "Manual · {count}",
+  "tx.chip.aborted": "Aborted",
+  "tx.chip.title": "Transactions",
+  "tx.popover.empty":
+    "No statements tracked yet. Statements run on this connection appear here while a transaction is open.",
+  "tx.popover.commit": "Commit",
+  "tx.popover.rollback": "Rollback",
+  "tx.popover.isolation": "Isolation",
+  "tx.popover.mode": "Manual transactions",
+  "tx.popover.modeHint": "New statements run inside an explicit transaction.",
+  "tx.popover.rowsAffected": "{count} row(s)",
+  "tx.footer.note": "Tracking Murmeli-issued statements.",
+  "tx.isolation.readUncommitted": "Read uncommitted",
+  "tx.isolation.readCommitted": "Read committed",
+  "tx.isolation.repeatableRead": "Repeatable read",
+  "tx.isolation.serializable": "Serializable",
+  "tx.toast.modeSwitchRefused":
+    "Commit or roll back the open transaction before switching to auto-commit.",
+  "tx.toast.committed": "Transaction committed — {count} statement(s) cleared.",
+  "tx.toast.rolledBack": "Transaction rolled back — {count} statement(s) cleared.",
+  "tx.log.rollbackByDisconnect": "Open transaction was rolled back by disconnect.",
+
   // Center panel empty states
   "empty.noTabs.title": "No tabs open",
   "empty.noTabs.hint": "Create a new Query tab to start writing SQL.",

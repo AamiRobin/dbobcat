@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import { ipc, onBackendEvent } from "@/lib/ipc";
 import { log } from "@/stores/log";
+import { shouldAskOnDisconnect, useTransactionStore } from "@/stores/transaction";
 import type { ConnInfo, ConnStatusEvent, DbType, ServerInfo } from "@/types/ipc";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -87,6 +88,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         "success",
         `Connected to ${info.serverInfo.product} ${info.serverInfo.version} on ${session.host}:${session.port} — ${elapsedMs}ms`,
       );
+      // Fresh connection → fresh ledger (backend starts idle too).
+      useTransactionStore.getState().clear();
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -104,6 +107,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   },
 
   disconnect: async () => {
+    // Guarded disconnect (Transactions Phase 1): an open transaction would
+    // be rolled back by the server — surface the ask dialog instead. It
+    // re-invokes disconnect() once the ledger is idle.
+    if (shouldAskOnDisconnect(useTransactionStore.getState().tx)) {
+      useTransactionStore.getState().requestAsk("disconnect");
+      return;
+    }
     const connId = get().connId;
     if (connId === null) {
       set({ status: "disconnected", link: "ok", connId: null, serverInfo: null, session: null });
@@ -116,6 +126,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       // The backend may already have dropped it; surface but keep going.
       log("warn", `Disconnect reported: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
+      useTransactionStore.getState().clear();
       set({
         status: "disconnected",
         link: "ok",

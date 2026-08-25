@@ -1,6 +1,7 @@
 import { Circle } from "lucide-react";
 
 import { Separator } from "@/components/ui/separator";
+import { TransactionChip } from "@/components/layout/TransactionChip";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useConnectionStore, type LinkState } from "@/stores/connection";
@@ -68,6 +69,8 @@ export function StatusBar() {
       {connected && link === "lost" && (
         <span className="text-destructive">{t("status.linkLost")}</span>
       )}
+
+      <TransactionChip />
 
       <span className="ml-auto flex items-center gap-2 tabular-nums">
         {connected && serverInfo && (
