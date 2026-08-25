@@ -31,6 +31,7 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio::sync::mpsc;
 use tokio_postgres::config::SslMode as PgSslMode;
+use tokio_postgres::error::SqlState;
 use tokio_postgres::types::to_sql_checked;
 use tokio_postgres::types::{IsNull, ToSql, Type};
 use tokio_postgres::{Client, Row, SimpleQueryMessage, SimpleQueryRow};
@@ -246,11 +247,19 @@ impl PgConnection {
         }
     }
     /// Run one SELECT-shaped script statement and build a ResultSet outcome.
-    async fn run_script_select(&self, stmt: &str) -> std::result::Result<QueryOutcome, String> {
+    /// The error carries the 25P02 aborted-transaction flag for the ledger.
+    async fn run_script_select(
+        &self,
+        stmt: &str,
+    ) -> std::result::Result<QueryOutcome, (String, bool)> {
         let started = std::time::Instant::now();
         // Planning is separate from execution — no double-run risk.
         let planned = self.client.prepare(stmt).await.ok();
-        let messages = self.client.simple_query(stmt).await.map_err(|e| e.to_string())?;
+        let messages = self
+            .client
+            .simple_query(stmt)
+            .await
+            .map_err(|e| (e.to_string(), err_aborts_transaction(&e)))?;
         let rows: Vec<SimpleQueryRow> = messages
             .into_iter()
             .filter_map(|m| match m {
@@ -309,6 +318,16 @@ impl PgConnection {
             sql: Some(stmt.to_string()),
         })
     }
+}
+
+/// True when this failure is PostgreSQL's "current transaction is aborted"
+/// (SQLSTATE 25P02): an open transaction got poisoned and every further
+/// statement will fail until ROLLBACK. The transaction ledger flips its
+/// phase to `Aborted` when it sees this.
+pub(crate) fn err_aborts_transaction(err: &tokio_postgres::Error) -> bool {
+    err.as_db_error()
+        .map(|e| e.code() == &SqlState::IN_FAILED_SQL_TRANSACTION)
+        .unwrap_or(false)
 }
 
 async fn fetch_server_info(client: &Client) -> Result<ServerInfo> {
@@ -1674,7 +1693,11 @@ impl DbConnection for PgConnection {
         })
     }
 
-    async fn apply_changes(&mut self, req: &ApplyChangesRequest) -> Result<ApplyChangesResult> {
+    async fn apply_changes(
+        &mut self,
+        req: &ApplyChangesRequest,
+        join_tx: bool,
+    ) -> Result<ApplyChangesResult> {
         let started = std::time::Instant::now();
         if req.changes.is_empty() {
             return Ok(ApplyChangesResult {
@@ -1708,24 +1731,43 @@ impl DbConnection for PgConnection {
         let mut applied = 0u32;
         let mut failed = errors.len() as u32;
 
-        // One atomic batch; statement failures roll back only themselves and
-        // are collected like any other row error (PG continues the tx).
-        let tx = self.client.transaction().await?;
-        for (index, sql, params) in &built {
-            let refs: Vec<&(dyn ToSql + Sync)> =
-                params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
-            match tx.execute(sql.as_str(), &refs).await {
-                Ok(_) => applied += 1,
-                Err(err) => {
-                    failed += 1;
-                    errors.push(RowError {
-                        index: *index,
-                        message: err.to_string(),
-                    });
+        if join_tx {
+            // Manual-mode grid edits join the actor-managed transaction:
+            // execute straight on the client (no internal transaction()).
+            for (index, sql, params) in &built {
+                let refs: Vec<&(dyn ToSql + Sync)> =
+                    params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+                match self.client.execute(sql.as_str(), &refs).await {
+                    Ok(_) => applied += 1,
+                    Err(err) => {
+                        failed += 1;
+                        errors.push(RowError {
+                            index: *index,
+                            message: err.to_string(),
+                        });
+                    }
                 }
             }
+        } else {
+            // One atomic batch; statement failures roll back only themselves
+            // and are collected like any other row error (PG continues the tx).
+            let tx = self.client.transaction().await?;
+            for (index, sql, params) in &built {
+                let refs: Vec<&(dyn ToSql + Sync)> =
+                    params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+                match tx.execute(sql.as_str(), &refs).await {
+                    Ok(_) => applied += 1,
+                    Err(err) => {
+                        failed += 1;
+                        errors.push(RowError {
+                            index: *index,
+                            message: err.to_string(),
+                        });
+                    }
+                }
+            }
+            tx.commit().await?;
         }
-        tx.commit().await?;
 
         Ok(ApplyChangesResult {
             applied,
@@ -1842,27 +1884,27 @@ impl DbConnection for PgConnection {
         for stmt in split_postgres(sql) {
             let snippet = sql_snippet(&stmt);
 
-            let result: std::result::Result<QueryOutcome, String> = if looks_like_result_set(&stmt)
-            {
-                self.run_script_select(&stmt).await
-            } else {
-                let started = std::time::Instant::now();
-                self.client
-                    .execute(stmt.as_str(), &[])
-                    .await
-                    .map(|affected| QueryOutcome::Exec {
-                        affected,
-                        last_insert_id: None,
-                        info: None,
-                        elapsed_ms: started.elapsed().as_millis() as u64,
-                    })
-                    .map_err(|e| e.to_string())
-            };
+            let result: std::result::Result<QueryOutcome, (String, bool)> =
+                if looks_like_result_set(&stmt) {
+                    self.run_script_select(&stmt).await
+                } else {
+                    let started = std::time::Instant::now();
+                    match self.client.execute(stmt.as_str(), &[]).await {
+                        Ok(affected) => Ok(QueryOutcome::Exec {
+                            affected,
+                            last_insert_id: None,
+                            info: None,
+                            elapsed_ms: started.elapsed().as_millis() as u64,
+                            sql: Some(stmt.clone()),
+                        }),
+                        Err(err) => Err((err.to_string(), err_aborts_transaction(&err))),
+                    }
+                };
 
             match result {
                 Ok(outcome) => outcomes.push(outcome),
-                Err(message) => {
-                    outcomes.push(QueryOutcome::Error { message, sql_snippet: snippet });
+                Err((message, aborted_tx)) => {
+                    outcomes.push(QueryOutcome::Error { message, sql_snippet: snippet, aborted_tx });
                     if stop_on_error {
                         break;
                     }

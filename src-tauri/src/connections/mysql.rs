@@ -849,7 +849,11 @@ impl DbConnection for MysqlConnection {
         })
     }
 
-    async fn apply_changes(&mut self, req: &ApplyChangesRequest) -> Result<ApplyChangesResult> {
+    async fn apply_changes(
+        &mut self,
+        req: &ApplyChangesRequest,
+        join_tx: bool,
+    ) -> Result<ApplyChangesResult> {
         let started = std::time::Instant::now();
         if req.changes.is_empty() {
             return Ok(ApplyChangesResult {
@@ -875,13 +879,31 @@ impl DbConnection for MysqlConnection {
         }
         let failed_in_build = errors.len();
 
-        let transactional = match self.table_engine(&req.db, &req.table).await? {
-            Some(engine) => TRANSACTIONAL_ENGINES.contains(&engine.to_ascii_uppercase().as_str()),
-            None => false, // views etc. — no engine row to consult
-        };
+        let transactional = !join_tx
+            && match self.table_engine(&req.db, &req.table).await? {
+                Some(engine) => TRANSACTIONAL_ENGINES.contains(&engine.to_ascii_uppercase().as_str()),
+                None => false, // views etc. — no engine row to consult
+            };
 
         let (mut applied, mut failed) = (0u32, failed_in_build as u32);
-        if transactional {
+        if join_tx {
+            // Manual-mode grid edits join the actor-managed transaction:
+            // statements go straight onto the connection (no internal
+            // BEGIN/COMMIT here — the ledger owns the tx lifecycle).
+            for (index, stmt) in &built {
+                match self
+                    .conn()?
+                    .exec_drop(stmt.sql.as_str(), Params::Positional(stmt.params.clone()))
+                    .await
+                {
+                    Ok(()) => applied += 1,
+                    Err(err) => {
+                        failed += 1;
+                        errors.push(RowError { index: *index, message: err.to_string() });
+                    }
+                }
+            }
+        } else if transactional {
             // One atomic batch; statement-level failures roll back only their
             // own statement and are collected like any other row error.
             let mut tx = self.conn()?.start_transaction(TxOpts::default()).await?;
@@ -1003,6 +1025,7 @@ impl DbConnection for MysqlConnection {
                     outcomes.push(QueryOutcome::Error {
                         message: err.to_string(),
                         sql_snippet: snippet,
+                        aborted_tx: false,
                     });
                     if stop_on_error {
                         break;
@@ -1024,6 +1047,7 @@ impl DbConnection for MysqlConnection {
                                 last_insert_id: result.last_insert_id(),
                                 info: server_info_text(&result),
                                 elapsed_ms: started.elapsed().as_millis() as u64,
+                                sql: Some(stmt.clone()),
                             });
                             match result.next().await {
                                 Ok(Some(_)) => {} // unexpected rows — keep draining next loop pass
@@ -1073,7 +1097,11 @@ impl DbConnection for MysqlConnection {
                         // Best-effort drain of any remaining result sets so
                         // the connection is reusable for the next statement.
                         let _ = result.drop_result().await;
-                        outcomes.push(QueryOutcome::Error { message, sql_snippet: snippet });
+                        outcomes.push(QueryOutcome::Error {
+                            message,
+                            sql_snippet: snippet,
+                            aborted_tx: false,
+                        });
                         if stop_on_error {
                             break;
                         }

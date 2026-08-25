@@ -17,12 +17,15 @@ pub mod server_admin;
 pub mod sqlite;
 pub mod sql;
 pub mod traits;
+pub mod tx;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::ssh::SshTunnelConfig;
 use dialect::SqlDialect;
+
+pub use tx::{IsolationLevel, TxEntry, TxLedger, TxMode, TxPhase};
 
 /// Quote a MySQL/MariaDB identifier for embedding in SQL text.
 ///
@@ -402,10 +405,36 @@ pub enum QueryOutcome {
         #[serde(skip_serializing_if = "Option::is_none")]
         info: Option<String>,
         elapsed_ms: u64,
+        /// Full source statement text (transaction-ledger bookkeeping — the
+        /// actor classifies it). Absent on older payloads.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sql: Option<String>,
     },
     /// The statement failed. With `stop_on_error = false` remaining
-    /// statements still execute.
-    Error { message: String, sql_snippet: String },
+    /// statements still execute. `aborted_tx` marks PostgreSQL's 25P02
+    /// state: the failure poisoned an open transaction that now needs
+    /// ROLLBACK (the connection actor flips its ledger phase on seeing it).
+    Error {
+        message: String,
+        sql_snippet: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        aborted_tx: bool,
+    },
+}
+
+/// Serializable snapshot of one connection's transaction ledger, carried by
+/// the `connection://tx` event and returned by `tx_get_state`. Mirrors
+/// `TxState` in `src/types/ipc.ts`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TxState {
+    pub mode: TxMode,
+    pub phase: TxPhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub isolation: Option<IsolationLevel>,
+    /// Number of uncommitted DML statements currently tracked.
+    pub dml_count: u64,
+    pub entries: Vec<TxEntry>,
 }
 
 // ---------------------------------------------------------------------------

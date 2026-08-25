@@ -29,6 +29,8 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
+use crate::connections::tx::isolation_sql;
+use crate::connections::{IsolationLevel, TxLedger, TxMode, TxPhase};
 use crate::connections::DbType;
 use crate::connections::mysql::MysqlConnection;
 use crate::connections::postgres::PgConnection;
@@ -43,7 +45,7 @@ use crate::connections::{
     FkRefValues, ForeignKeyMeta, GrantDetail, GrantRequest, ProcessInfo, QueryOutcome,
     QueryPageRequest, QueryPageResult, ResolvedConnectionConfig, RowValue, RowsChunk,
     RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateResult, StatusVariable,
-    TableDdl, TableMeta, TableSchemaData, TriggerMeta, UserMeta,
+    TableDdl, TableMeta, TableSchemaData, TriggerMeta, TxState, UserMeta,
 };
 use crate::connections::sql::build_fk_ref_sql;
 use crate::error::{AppError, Result};
@@ -51,6 +53,10 @@ use crate::ssh::SshTunnelManager;
 
 /// Backend event carrying link-state transitions for one connection.
 pub const CONN_STATUS_EVENT: &str = "connection://status";
+
+/// Backend event carrying a full transaction-ledger snapshot after every
+/// ledger change (Transactions UI Phase 1).
+pub const TX_STATE_EVENT: &str = "connection://tx";
 
 /// Link-state value carried by [`ConnStatusEvent`]; serialized as the
 /// lowercase wire string the frontend expects.
@@ -69,6 +75,18 @@ pub enum ConnStatus {
 pub struct ConnStatusEvent {
     pub conn_id: u32,
     pub status: ConnStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// Payload of [`TX_STATE_EVENT`]: the whole ledger snapshot plus an optional
+/// human-readable note (e.g. "rolled back by disconnect"). Mirrors
+/// `TxStateEvent` in `src/types/ipc.ts`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TxStateEvent {
+    pub conn_id: u32,
+    pub state: TxState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
@@ -243,6 +261,24 @@ enum ConnectionCommand {
     Ping {
         reply: oneshot::Sender<Result<ExecResult>>,
     },
+    // Transactions UI Phase 1: explicit ledger control.
+    TxCommit {
+        reply: oneshot::Sender<Result<u64>>,
+    },
+    TxRollback {
+        reply: oneshot::Sender<Result<u64>>,
+    },
+    TxSetMode {
+        mode: TxMode,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    TxSetIsolation {
+        level: IsolationLevel,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    TxGetState {
+        reply: oneshot::Sender<Result<TxState>>,
+    },
     // Phase 9-B: internal reconnect tick sent by the backoff scheduler.
     InternalReconnect,
     Close {
@@ -280,9 +316,38 @@ struct ActorState {
     lost: bool,
     /// Remaining scheduled attempts in the current episode.
     attempts_left: u32,
+    /// Transaction ledger (Transactions UI Phase 1).
+    tx: TxLedger,
 }
 
 impl ActorState {
+    /// Emit a full ledger snapshot after a ledger change (best-effort).
+    /// `message` annotates special transitions (e.g. rollback by disconnect).
+    fn emit_tx(&self, message: Option<String>) {
+        if let Some(app) = &self.app {
+            let _ = app.emit(
+                TX_STATE_EVENT,
+                TxStateEvent {
+                    conn_id: self.conn_id,
+                    state: self.tx.state(),
+                    message,
+                },
+            );
+        }
+    }
+
+    /// A silent reconnect succeeded: any open transaction was rolled back
+    /// server-side when the old link died. Keep mode/isolation, forget work.
+    /// Returns the note for the frontend log when something was dropped.
+    fn reset_tx_after_reconnect(&mut self) -> Option<String> {
+        if self.tx.phase != TxPhase::Idle {
+            let note = "open transaction was rolled back by disconnect".to_string();
+            self.tx.reset_after_reconnect();
+            return Some(note);
+        }
+        None
+    }
+
     /// Emit a link-state transition to the frontend (best-effort).
     fn emit(&self, status: ConnStatus, message: Option<String>) {
         if let Some(app) = &self.app {
@@ -403,7 +468,9 @@ impl ActorState {
         match self.attempt(driver).await {
             Ok(()) => {
                 self.lost = false;
+                let note = self.reset_tx_after_reconnect();
                 self.emit(ConnStatus::Reconnected, None);
+                self.emit_tx(note);
             }
             Err(err) => {
                 self.attempts_left = self.attempts_left.saturating_sub(1);
@@ -422,6 +489,11 @@ pub struct ConnectOptions {
     /// Keep-alive ping interval in seconds (`None` = unset → Heidi default,
     /// `Some(0)` = off). Ignored for SQLite regardless of value.
     pub keep_alive_sec: Option<u64>,
+    /// Initial transaction mode (Transactions Phase 1); `None` = auto.
+    pub tx_mode: Option<TxMode>,
+    /// Isolation level applied right after connect via a session SET;
+    /// `None` = leave the server default untouched.
+    pub isolation: Option<IsolationLevel>,
 }
 
 /// Open one driver instance for the configured engine. Shared by
@@ -494,7 +566,7 @@ impl ConnectionManager {
 
         // Any failure past this point must tear the tunnel back down.
         let opened = open_driver(&resolved).await;
-        let driver = match opened {
+        let mut driver = match opened {
             Ok(driver) => driver,
             Err(err) => {
                 if let Some(id) = tunnel_id {
@@ -504,6 +576,18 @@ impl ConnectionManager {
             }
         };
         let server_info = driver.server_info();
+
+        // Apply the session-level isolation level right after connect (next
+        // transactions only — safe to issue outside any transaction).
+        if let Some(level) = opts.isolation {
+            let sql = isolation_sql(resolved.engine, level);
+            if let Err(err) = driver.execute(&sql).await {
+                if let Some(id) = tunnel_id {
+                    tunnels.close(id).await;
+                }
+                return Err(err);
+            }
+        }
 
         let reconnect = is_network_engine(original.engine).then(|| ReconnectContext {
             config: original,
@@ -525,6 +609,7 @@ impl ConnectionManager {
             }),
             lost: false,
             attempts_left: 0,
+            tx: TxLedger::new(opts.tx_mode.unwrap_or_default(), opts.isolation),
         };
         tokio::spawn(connection_task(driver, cmd_rx, actor));
 
@@ -617,6 +702,9 @@ impl ConnectionManager {
     }
 
     /// Apply a batch of grid changes through the owning connection task.
+    /// In manual transaction mode with an open transaction the actor joins
+    /// the statements to the managed transaction instead of an internal
+    /// driver-transaction batch (join_tx is computed inside the actor).
     pub async fn apply_changes(
         &self,
         conn_id: u32,
@@ -1100,6 +1188,44 @@ impl ConnectionManager {
             .await
     }
 
+    // -----------------------------------------------------------------------
+    // Transaction ledger (Transactions UI Phase 1)
+    // -----------------------------------------------------------------------
+
+    /// Current ledger snapshot. Fails only when the session is unknown.
+    pub async fn tx_get_state(&self, conn_id: u32) -> Result<TxState> {
+        self.request(conn_id, |reply| ConnectionCommand::TxGetState { reply })
+            .await
+    }
+
+    /// COMMIT the open transaction. Returns how many entries were cleared.
+    pub async fn tx_commit(&self, conn_id: u32) -> Result<u64> {
+        self.request(conn_id, |reply| ConnectionCommand::TxCommit { reply })
+            .await
+    }
+
+    /// ROLLBACK (allowed from Open or Aborted). Returns entries cleared.
+    pub async fn tx_rollback(&self, conn_id: u32) -> Result<u64> {
+        self.request(conn_id, |reply| ConnectionCommand::TxRollback { reply })
+            .await
+    }
+
+    /// Switch auto ↔ manual. Refused manual→auto while a tx is open.
+    pub async fn tx_set_mode(&self, conn_id: u32, mode: TxMode) -> Result<()> {
+        self.request(conn_id, move |reply| {
+            ConnectionCommand::TxSetMode { mode, reply }
+        })
+        .await
+    }
+
+    /// Apply a new session isolation level. Refused while a tx is open.
+    pub async fn tx_set_isolation(&self, conn_id: u32, level: IsolationLevel) -> Result<()> {
+        self.request(conn_id, move |reply| {
+            ConnectionCommand::TxSetIsolation { level, reply }
+        })
+        .await
+    }
+
     /// Send one command and await its typed reply.
     async fn request<R: Send>(
         &self,
@@ -1175,6 +1301,73 @@ fn spawn_keep_alive(cmd_tx: mpsc::Sender<ConnectionCommand>, interval: Duration)
     });
 }
 
+/// Open the explicit transaction for manual mode before a mutating command.
+/// The actor issues the BEGIN itself (NOT via the ledger's classifier) and
+/// only when the ledger is idle; returns the failure for fail-fast replies.
+async fn ensure_manual_tx_open(
+    driver: &mut Box<dyn DbConnection>,
+    st: &mut ActorState,
+) -> Option<AppError> {
+    if !st.tx.needs_begin() {
+        return None;
+    }
+    // Both MySQL/MariaDB and PostgreSQL accept this spelling.
+    match driver.execute("START TRANSACTION").await {
+        Ok(_) => {
+            st.tx.begin();
+            st.emit_tx(None);
+            None
+        }
+        Err(err) => Some(err),
+    }
+}
+
+/// Feed one `run_script` outcome list into the ledger. Consecutive result
+/// sets repeating the same statement text come from ONE statement (a
+/// procedure CALL yielding several sets) — only the first feeds an entry.
+fn feed_outcomes_to_ledger(
+    ledger: &mut TxLedger,
+    dialect: crate::connections::dialect::SqlDialect,
+    outcomes: &[QueryOutcome],
+) {
+    let mut last_sql: Option<&str> = None;
+    let mut last_was_result_set = false;
+    for outcome in outcomes {
+        match outcome {
+            QueryOutcome::ResultSet { sql: Some(sql), rows, .. } => {
+                let duplicate =
+                    last_was_result_set && last_sql == Some(sql.as_str());
+                if !duplicate {
+                    ledger.on_statement_ok(dialect, sql, rows.len() as u64);
+                }
+                last_sql = Some(sql.as_str());
+                last_was_result_set = true;
+            }
+            QueryOutcome::Exec { affected, sql: Some(sql), .. } => {
+                ledger.on_statement_ok(dialect, sql, *affected);
+                last_sql = Some(sql.as_str());
+                last_was_result_set = false;
+            }
+            QueryOutcome::Error { aborted_tx, .. } => {
+                if *aborted_tx {
+                    ledger.on_statement_err(dialect);
+                }
+                last_sql = None;
+                last_was_result_set = false;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Message-level fallback for 25P02 on paths that return plain `AppError`
+/// (single-statement execute / apply-changes): PostgreSQL's driver error
+/// text carries the state or message verbatim.
+fn message_aborts_tx(message: &str) -> bool {
+    message.contains("25P02")
+        || message.contains("current transaction is aborted")
+}
+
 /// The per-connection actor loop.
 ///
 /// All driver access stays here (serialized). The macro wraps every
@@ -1192,7 +1385,9 @@ async fn connection_task(
             if st.lost && st.reconnect.is_some() {
                 if st.attempt(&mut driver).await.is_ok() {
                     st.lost = false;
+                    let tx_note = st.reset_tx_after_reconnect();
                     st.emit(ConnStatus::Reconnected, None);
+                    st.emit_tx(tx_note);
                 }
             }
             if st.lost {
@@ -1230,7 +1425,36 @@ async fn connection_task(
                 run_cmd!(reply, driver.query_page(&req));
             }
             ConnectionCommand::ApplyChanges { req, reply } => {
-                run_cmd!(reply, driver.apply_changes(&req));
+                ensure_live!();
+                let dialect = driver.server_info().dialect;
+                if let Some(err) = ensure_manual_tx_open(&mut driver, &mut st).await {
+                    st.classify_message(&err.to_string());
+                    let _ = reply.send(Err(err));
+                    continue;
+                }
+                // Manual mode + open tx → the batch joins the managed
+                // transaction (no internal BEGIN/COMMIT inside the driver).
+                let join_tx = st.tx.mode == TxMode::Manual && st.tx.phase == TxPhase::Open;
+                let result = driver.apply_changes(&req, join_tx).await;
+                st.classify(&result);
+                match &result {
+                    Ok(res) => {
+                        if join_tx && res.applied > 0 {
+                            st.tx.record_dml(
+                                &format!("APPLY CHANGES {}.{} (batch)", req.db, req.table),
+                                res.applied as u64,
+                            );
+                            st.emit_tx(None);
+                        }
+                    }
+                    Err(err) => {
+                        if message_aborts_tx(&err.to_string()) {
+                            st.tx.on_statement_err(dialect);
+                            st.emit_tx(None);
+                        }
+                    }
+                }
+                let _ = reply.send(result);
             }
             ConnectionCommand::CountRows {
                 database,
@@ -1265,7 +1489,22 @@ async fn connection_task(
                 stop_on_error,
                 reply,
             } => {
-                run_cmd!(reply, driver.run_script(&sql, stop_on_error));
+                ensure_live!();
+                let dialect = driver.server_info().dialect;
+                if let Some(err) = ensure_manual_tx_open(&mut driver, &mut st).await {
+                    st.classify_message(&err.to_string());
+                    let _ = reply.send(Err(err));
+                    continue;
+                }
+                let result = driver.run_script(&sql, stop_on_error).await;
+                st.classify(&result);
+                if let Ok(outcomes) = &result {
+                    feed_outcomes_to_ledger(&mut st.tx, dialect, outcomes);
+                    if !outcomes.is_empty() {
+                        st.emit_tx(None);
+                    }
+                }
+                let _ = reply.send(result);
             }
             ConnectionCommand::GetTableDdl {
                 database,
@@ -1324,7 +1563,28 @@ async fn connection_task(
             ConnectionCommand::ExecuteSingle { sql, reply } => {
                 // Routed through the trait's `execute` so other drivers hook
                 // in; the MySQL driver maps it to `execute_single` semantics.
-                run_cmd!(reply, driver.execute(&sql));
+                ensure_live!();
+                let dialect = driver.server_info().dialect;
+                if let Some(err) = ensure_manual_tx_open(&mut driver, &mut st).await {
+                    st.classify_message(&err.to_string());
+                    let _ = reply.send(Err(err));
+                    continue;
+                }
+                let result = driver.execute(&sql).await;
+                st.classify(&result);
+                match &result {
+                    Ok(exec) => {
+                        st.tx.on_statement_ok(dialect, &sql, exec.rows_affected);
+                        st.emit_tx(None);
+                    }
+                    Err(err) => {
+                        if message_aborts_tx(&err.to_string()) {
+                            st.tx.on_statement_err(dialect);
+                            st.emit_tx(None);
+                        }
+                    }
+                }
+                let _ = reply.send(result);
             }
             ConnectionCommand::StreamTableRows {
                 database,
@@ -1357,21 +1617,46 @@ async fn connection_task(
                 upsert_columns,
                 reply,
             } => {
-                run_cmd!(
-                    reply,
-                    async {
-                        driver
-                            .insert_rows(
-                                &database,
-                                &table,
-                                &columns,
-                                &rows,
-                                ignore,
-                                upsert_columns.as_deref(),
-                            )
-                            .await
+                ensure_live!();
+                let dialect = driver.server_info().dialect;
+                if let Some(err) = ensure_manual_tx_open(&mut driver, &mut st).await {
+                    st.classify_message(&err.to_string());
+                    let _ = reply.send(Err(err));
+                    continue;
+                }
+                let join_tx = st.tx.mode == TxMode::Manual && st.tx.phase == TxPhase::Open;
+                let result = async {
+                    driver
+                        .insert_rows(
+                            &database,
+                            &table,
+                            &columns,
+                            &rows,
+                            ignore,
+                            upsert_columns.as_deref(),
+                        )
+                        .await
+                }
+                .await;
+                st.classify(&result);
+                match &result {
+                    Ok(inserted) => {
+                        if join_tx && *inserted > 0 {
+                            st.tx.record_dml(
+                                &format!("INSERT INTO {database}.{table} (batch)"),
+                                *inserted,
+                            );
+                            st.emit_tx(None);
+                        }
                     }
-                );
+                    Err(err) => {
+                        if message_aborts_tx(&err.to_string()) {
+                            st.tx.on_statement_err(dialect);
+                            st.emit_tx(None);
+                        }
+                    }
+                }
+                let _ = reply.send(result);
             }
             ConnectionCommand::ListUsers { reply } => {
                 run_cmd!(reply, driver.list_users());
@@ -1418,6 +1703,92 @@ async fn connection_task(
             }
             ConnectionCommand::ListStatus { reply } => {
                 run_cmd!(reply, driver.list_status());
+            }
+            ConnectionCommand::TxCommit { reply } => {
+                ensure_live!();
+                if st.tx.phase != TxPhase::Open {
+                    let _ = reply.send(Err(AppError::Db(
+                        "no open transaction to commit".into(),
+                    )));
+                    continue;
+                }
+                let result = driver.execute("COMMIT").await;
+                st.classify(&result);
+                match result {
+                    Ok(_) => {
+                        let cleared = st.tx.entries.len() as u64;
+                        st.tx.clear_after_tcl();
+                        st.emit_tx(None);
+                        let _ = reply.send(Ok(cleared));
+                    }
+                    Err(err) => {
+                        let _ = reply.send(Err(err));
+                    }
+                }
+            }
+            ConnectionCommand::TxRollback { reply } => {
+                ensure_live!();
+                // Allowed from Open AND Aborted (the only way out of 25P02).
+                if st.tx.phase == TxPhase::Idle {
+                    let _ = reply.send(Err(AppError::Db(
+                        "no open transaction to roll back".into(),
+                    )));
+                    continue;
+                }
+                let result = driver.execute("ROLLBACK").await;
+                st.classify(&result);
+                match result {
+                    Ok(_) => {
+                        let cleared = st.tx.entries.len() as u64;
+                        st.tx.clear_after_tcl();
+                        st.emit_tx(None);
+                        let _ = reply.send(Ok(cleared));
+                    }
+                    Err(err) => {
+                        let _ = reply.send(Err(err));
+                    }
+                }
+            }
+            ConnectionCommand::TxSetMode { mode, reply } => {
+                ensure_live!();
+                if mode == TxMode::Auto && st.tx.refuses_switch_to_auto() {
+                    let _ = reply.send(Err(AppError::Db(
+                        "cannot switch to auto-commit while a transaction is open — commit or roll back first".into(),
+                    )));
+                    continue;
+                }
+                if st.tx.mode != mode {
+                    st.tx.mode = mode;
+                    st.emit_tx(None);
+                }
+                let _ = reply.send(Ok(()));
+            }
+            ConnectionCommand::TxSetIsolation { level, reply } => {
+                ensure_live!();
+                if st.tx.phase != TxPhase::Idle {
+                    let _ = reply.send(Err(AppError::Db(
+                        "cannot change isolation level while a transaction is open".into(),
+                    )));
+                    continue;
+                }
+                let dialect = driver.server_info().dialect;
+                let sql = isolation_sql(dialect, level);
+                let result = driver.execute(&sql).await;
+                st.classify(&result);
+                match result {
+                    Ok(_) => {
+                        st.tx.isolation = Some(level);
+                        st.emit_tx(None);
+                        let _ = reply.send(Ok(()));
+                    }
+                    Err(err) => {
+                        let _ = reply.send(Err(err));
+                    }
+                }
+            }
+            ConnectionCommand::TxGetState { reply } => {
+                ensure_live!();
+                let _ = reply.send(Ok(st.tx.state()));
             }
             ConnectionCommand::Ping { reply } => {
                 ensure_live!();

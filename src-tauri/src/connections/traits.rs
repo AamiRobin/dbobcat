@@ -66,8 +66,17 @@ pub trait DbConnection: Send {
 
     /// Apply a batch of grid changes (insert/update/delete). Rows are applied
     /// independently where possible; per-row failures are reported, not fatal.
-    async fn apply_changes(&mut self, req: &ApplyChangesRequest) -> Result<ApplyChangesResult> {
-        let _ = req;
+    ///
+    /// `join_tx` (Transactions Phase 1): when true the statements run on the
+    /// driver's raw connection WITHOUT opening an internal transaction, so
+    /// they join the explicit transaction the connection actor manages in
+    /// manual mode. When false drivers keep their own atomic-batch behaviour.
+    async fn apply_changes(
+        &mut self,
+        req: &ApplyChangesRequest,
+        join_tx: bool,
+    ) -> Result<ApplyChangesResult> {
+        let _ = (req, join_tx);
         Err(unsupported())
     }
 

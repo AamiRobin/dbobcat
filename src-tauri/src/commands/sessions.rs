@@ -13,7 +13,9 @@ use tauri::{AppHandle, Manager, State};
 use crate::connections::manager::{
     open_driver, ConnectionManager, ConnectOptions,
 };
-use crate::connections::{ConnInfo, DbType, ResolvedConnectionConfig, SslMode};
+use crate::connections::{
+    ConnInfo, DbType, IsolationLevel, ResolvedConnectionConfig, SslMode, TxMode,
+};
 use crate::credentials::{ssh_entry_id, CredentialStore};
 use crate::error::{AppError, Result};
 use crate::settings;
@@ -57,6 +59,14 @@ pub struct SavedSession {
     /// Keep-alive ping interval in seconds; 0 = off, unset = 20 (Heidi).
     #[serde(default)]
     pub keep_alive_sec: Option<u64>,
+    // Transactions UI Phase 1: per-connection defaults. Both optional for
+    // backward compatibility with existing settings.json files.
+    /// Initial transaction mode; unset = auto-commit.
+    #[serde(default)]
+    pub tx_mode: Option<TxMode>,
+    /// Session isolation level applied at connect; unset = server default.
+    #[serde(default)]
+    pub isolation: Option<IsolationLevel>,
 }
 
 /// Outcome of `session_test`; transport-level failures are reported inline
@@ -380,8 +390,17 @@ pub async fn session_connect(
         .ok_or_else(|| AppError::Config(format!("unknown session '{session_id}'")))?;
 
     let config = resolve_config(&session, &credentials, None, None)?;
+    // Manual transaction mode is a server-engine feature; SQLite sessions
+    // keep the defaults regardless of what an edited profile might carry.
+    let (tx_mode, isolation) = if session.db_type == DbType::Sqlite {
+        (None, None)
+    } else {
+        (session.tx_mode, session.isolation)
+    };
     let opts = ConnectOptions {
         keep_alive_sec: session.keep_alive_sec,
+        tx_mode,
+        isolation,
     };
     connections.connect(app, config, &tunnels, opts).await
 }

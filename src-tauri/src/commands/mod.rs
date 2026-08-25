@@ -21,6 +21,7 @@ pub mod schema;
 pub mod server;
 pub mod sessions;
 pub mod snippets;
+pub mod tx;
 
 /// Health-check command proving the IPC round-trip end to end.
 #[tauri::command]
@@ -47,6 +48,12 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         sessions::session_test,
         sessions::session_connect,
         sessions::session_disconnect,
+        // transaction ledger (Transactions UI Phase 1)
+        tx::tx_get_state,
+        tx::tx_set_mode,
+        tx::tx_commit,
+        tx::tx_rollback,
+        tx::tx_set_isolation,
         // schema browsing
         schema::db_list_databases,
         schema::db_list_tables,

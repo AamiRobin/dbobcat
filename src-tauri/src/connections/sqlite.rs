@@ -880,7 +880,18 @@ impl DbConnection for SqliteConnection {
         Ok(out)
     }
 
-    async fn apply_changes(&mut self, req: &ApplyChangesRequest) -> Result<ApplyChangesResult> {
+    async fn apply_changes(
+        &mut self,
+        req: &ApplyChangesRequest,
+        join_tx: bool,
+    ) -> Result<ApplyChangesResult> {
+        // Manual transaction mode is MySQL/MariaDB + PostgreSQL only (the
+        // frontend hides the chip for SQLite); this is a defensive guard.
+        if join_tx {
+            return Err(AppError::Unsupported(
+                "manual transactions are not supported for SQLite".into(),
+            ));
+        }
         let started = std::time::Instant::now();
         if req.changes.is_empty() {
             return Ok(ApplyChangesResult {
@@ -1012,6 +1023,7 @@ impl DbConnection for SqliteConnection {
                     outcomes.push(QueryOutcome::Error {
                         message,
                         sql_snippet: snippet,
+                        aborted_tx: false,
                     });
                     if stop_on_error {
                         break;
@@ -1481,6 +1493,7 @@ fn run_script_statement(
             last_insert_id,
             info: None,
             elapsed_ms: started.elapsed().as_millis() as u64,
+            sql: Some(stmt.to_string()),
         })
     }
 }
