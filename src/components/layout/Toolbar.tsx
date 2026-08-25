@@ -88,6 +88,7 @@ function MurmeliGlyph() {
 export function Toolbar() {
   const theme = useUiStore((s) => s.theme);
   const sessionManagerOpen = useUiStore((s) => s.sessionManagerOpen);
+  const sessionManagerSelectId = useUiStore((s) => s.sessionManagerSelectId);
   const setSessionManagerOpen = useUiStore((s) => s.setSessionManagerOpen);
   const status = useConnectionStore((s) => s.status);
   const connId = useConnectionStore((s) => s.connId);
@@ -254,7 +255,11 @@ export function Toolbar() {
         </Tooltip>
       </div>
 
-      <SessionManagerDialog open={sessionManagerOpen} onOpenChange={setSessionManagerOpen} />
+      <SessionManagerDialog
+        open={sessionManagerOpen}
+        onOpenChange={setSessionManagerOpen}
+        initialSelectedId={sessionManagerSelectId}
+      />
     </header>
   );
 }

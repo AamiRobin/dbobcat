@@ -34,6 +34,12 @@ import {
 interface SessionManagerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Session row to select when the dialog is opened externally (command
+   * palette Shift+Enter). Applied once the session list has loaded; a
+   * no-op when the row no longer exists.
+   */
+  initialSelectedId?: string | null;
 }
 
 /** Wire args for `session_save` / `session_test`. */
@@ -209,7 +215,11 @@ function SessionRow({
 
 const asArgs = (p: SavePayload): Record<string, unknown> => ({ ...p });
 
-export function SessionManagerDialog({ open, onOpenChange }: SessionManagerDialogProps) {
+export function SessionManagerDialog({
+  open,
+  onOpenChange,
+  initialSelectedId = null,
+}: SessionManagerDialogProps) {
   const queryClient = useQueryClient();
   const connectSession = useConnectionStore((s) => s.connectSession);
 
@@ -249,6 +259,16 @@ export function SessionManagerDialog({ open, onOpenChange }: SessionManagerDialo
       selectSession(null);
     }
   }, [open, list, selectedId]);
+
+  // External preselection (palette Shift+Enter): apply once the requested
+  // row exists in the loaded list; re-opening for the same id still works
+  // because `open` flips and the store clears the id between uses.
+  useEffect(() => {
+    if (!open || !initialSelectedId) return;
+    if (selectedId === initialSelectedId) return;
+    if (!list.some((s) => s.id === initialSelectedId)) return; // wait for load
+    selectSession(initialSelectedId);
+  }, [open, initialSelectedId, list, selectedId]);
 
   const invalidateSessions = () => queryClient.invalidateQueries({ queryKey: ["sessions"] });
 

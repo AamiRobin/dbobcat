@@ -23,6 +23,12 @@ interface UiState {
   dataStats: DataStats | null;
   // Global dialogs, openable from toolbar / shortcuts / native menu.
   sessionManagerOpen: boolean;
+  /**
+   * Session row to preselect when the manager opens externally (palette
+   * Shift+Enter). Null = no preselection; always cleared on close/plain
+   * opens so a stale id can never hijack a later manual open.
+   */
+  sessionManagerSelectId: string | null;
   shortcutsOpen: boolean;
   aboutOpen: boolean;
   setLang: (lang: Lang) => void;
@@ -32,7 +38,7 @@ interface UiState {
   toggleLogCollapsed: () => void;
   setDataStats: (stats: DataStats) => void;
   clearDataStats: () => void;
-  setSessionManagerOpen: (open: boolean) => void;
+  setSessionManagerOpen: (open: boolean, selectId?: string | null) => void;
   setShortcutsOpen: (open: boolean) => void;
   setAboutOpen: (open: boolean) => void;
 }
@@ -64,6 +70,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   logCollapsed: false,
   dataStats: null,
   sessionManagerOpen: false,
+  sessionManagerSelectId: null,
   shortcutsOpen: false,
   aboutOpen: false,
 
@@ -87,7 +94,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setDataStats: (stats) => set({ dataStats: stats }),
   clearDataStats: () => set({ dataStats: null }),
 
-  setSessionManagerOpen: (sessionManagerOpen) => set({ sessionManagerOpen }),
+  setSessionManagerOpen: (sessionManagerOpen, selectId = null) =>
+    set({ sessionManagerOpen, sessionManagerSelectId: selectId }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   setAboutOpen: (aboutOpen) => set({ aboutOpen }),
 }));

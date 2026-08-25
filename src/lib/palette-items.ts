@@ -19,14 +19,17 @@
  * subsequence. Regex-valid queries that match without earning a literal
  * tier land at the fuzzy tier.
  *
- * Phase 2 hooks: a `{ type: "history" }` item variant plus a `#` branch in
- * `parseMode` are reserved for query history / recents.
+ * Phase 2: a leading `#` selects query-history mode (`PaletteHistoryItem`
+ * pool), object items widen past tables/views to routines/triggers/events,
+ * and recents are plain object rows stamped with `lastOpenedAt`.
  */
 
 import { t, type TKey } from "@/lib/i18n";
 import { SHORTCUTS, dispatchAction } from "@/lib/shortcuts";
 import { sessionColor } from "@/lib/session-groups";
 import { fetchDatabases } from "@/lib/db-queries";
+import type { RecentDescriptor } from "@/lib/palette-recents";
+import { snippet } from "@/lib/query-queries";
 import { notify } from "@/lib/toast";
 import { useConnectionStore } from "@/stores/connection";
 import { openExportDialog } from "@/stores/export-dialog";
@@ -34,16 +37,24 @@ import { openImportWizard } from "@/stores/import-dialog";
 import { openServerToolTab } from "@/stores/tabs";
 import type {
   DatabaseInfo,
+  EventMeta,
+  HistoryEntry,
+  RoutineKind,
+  RoutineMeta,
   SavedSession,
   SqlDialect,
   TableMeta,
+  TriggerMeta,
 } from "@/types/ipc";
 
 // ---------------------------------------------------------------------------
 // Item model
 // ---------------------------------------------------------------------------
 
-export type PaletteMode = "unified" | "commands" | "sessions";
+export type PaletteMode = "unified" | "commands" | "sessions" | "history";
+
+/** Object kinds searchable in the palette (mirrors the tree's leaf kinds). */
+export type PaletteObjectKind = "table" | "view" | "routine" | "trigger" | "event";
 
 /** One runnable app action (i18n key stored, resolved at render). */
 export interface PaletteActionItem {
@@ -70,27 +81,37 @@ export interface PaletteSessionItem {
   connect: () => Promise<boolean>;
 }
 
-/** One table/view of the active connection (v1 object scope). */
+/** One searchable object of the active connection. */
 export interface PaletteObjectItem {
   type: "object";
   /** Unique cmdk row value: kind + db + name. */
   id: string;
   db: string;
   name: string;
-  kind: "table" | "view";
+  kind: PaletteObjectKind;
+  /** procedure vs function — only set for routines (drives icon + editor). */
+  routineKind?: RoutineKind;
+  /**
+   * ISO timestamp present ONLY on recents rows (set by
+   * `buildRecentItems`); used to split the RECENTS section from the
+   * regular object sections at render time.
+   */
+  lastOpenedAt?: string;
 }
 
 export type PaletteItem =
   | PaletteActionItem
   | PaletteSessionItem
-  | PaletteObjectItem;
+  | PaletteObjectItem
+  | PaletteHistoryItem;
 
-/** Reserved for Phase 2 recents / query history (`#` mode). */
+/** One executed script from the persisted query history (`#` mode). */
 export interface PaletteHistoryItem {
   type: "history";
   id: string;
   sql: string;
   connName: string;
+  executedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,9 +124,8 @@ function stripOneSpace(rest: string): string {
 }
 
 /**
- * Leading `>` selects commands, `@` selects sessions; any other text stays
- * in unified mode with the raw input as the query. (Phase 2 adds `#` for
- * history right here.)
+ * Leading `>` selects commands, `@` sessions, `#` query history; any other
+ * text stays in unified mode with the raw input as the query.
  */
 export function parseMode(raw: string): { mode: PaletteMode; query: string } {
   if (raw.startsWith(">")) {
@@ -113,6 +133,9 @@ export function parseMode(raw: string): { mode: PaletteMode; query: string } {
   }
   if (raw.startsWith("@")) {
     return { mode: "sessions", query: stripOneSpace(raw.slice(1)) };
+  }
+  if (raw.startsWith("#")) {
+    return { mode: "history", query: stripOneSpace(raw.slice(1)) };
   }
   return { mode: "unified", query: raw };
 }
@@ -330,14 +353,22 @@ export function buildSessionItems(
   }));
 }
 
+/** Optional per-db second-wave pools (routines/triggers/events). */
+export type PoolByDb<T> = Record<string, T[] | undefined>;
+
 /**
- * Flatten databases × table lists into palette rows. v1 scope is tables and
- * views only — system tables, materialized views and sequences stay out
- * (Phase 2 widens this alongside routines/triggers/events).
+ * Flatten databases × object lists into palette rows. Tables/views come
+ * from the first-wave table scan; routines/triggers/events flow in from the
+ * (dialect-gated) second wave — the caller passes only pools it actually
+ * fetched, mirroring how DbTree hides whole groups per engine. System
+ * tables, materialized views and sequences stay out.
  */
 export function buildObjectItems(
   dbs: DatabaseInfo[],
-  tablesByDb: Record<string, TableMeta[] | undefined>,
+  tablesByDb: PoolByDb<TableMeta>,
+  routinesByDb: PoolByDb<RoutineMeta> = {},
+  triggersByDb: PoolByDb<TriggerMeta> = {},
+  eventsByDb: PoolByDb<EventMeta> = {},
 ): PaletteObjectItem[] {
   const items: PaletteObjectItem[] = [];
   for (const db of dbs) {
@@ -351,8 +382,82 @@ export function buildObjectItems(
         kind: meta.kind,
       });
     }
+    for (const routine of routinesByDb[db.name] ?? []) {
+      items.push({
+        type: "object",
+        id: `object:routine:${db.name}.${routine.name}`,
+        db: db.name,
+        name: routine.name,
+        kind: "routine",
+        routineKind: routine.kind,
+      });
+    }
+    for (const trigger of triggersByDb[db.name] ?? []) {
+      items.push({
+        type: "object",
+        id: `object:trigger:${db.name}.${trigger.name}`,
+        db: db.name,
+        name: trigger.name,
+        kind: "trigger",
+      });
+    }
+    for (const event of eventsByDb[db.name] ?? []) {
+      items.push({
+        type: "object",
+        id: `object:event:${db.name}.${event.name}`,
+        db: db.name,
+        name: event.name,
+        kind: "event",
+      });
+    }
   }
   return items;
+}
+
+/**
+ * Persisted history entries → palette rows, preserving the store's
+ * most-recent-first order.
+ */
+export function buildHistoryItems(entries: HistoryEntry[]): PaletteHistoryItem[] {
+  return entries.map((entry) => ({
+    type: "history" as const,
+    id: `history:${entry.id}`,
+    sql: entry.sql,
+    connName: entry.connName,
+    executedAt: entry.executedAt,
+  }));
+}
+
+/**
+ * The unified-mode QUERY HISTORY slice: the `limit` newest entries
+ * regardless of the pool's incoming order (defensive — the backend already
+ * returns newest-first).
+ */
+export function sliceRecentHistory(
+  entries: HistoryEntry[],
+  limit = 8,
+): HistoryEntry[] {
+  return [...entries]
+    .sort((a, b) => b.executedAt.localeCompare(a.executedAt))
+    .slice(0, limit);
+}
+
+/**
+ * Resolved recent descriptors → palette rows. Rows keep their descriptor
+ * order (LRU, most-recent-first) and carry `lastOpenedAt` so the renderer
+ * can split them into the RECENTS section.
+ */
+export function buildRecentItems(
+  descriptors: RecentDescriptor[],
+): PaletteObjectItem[] {
+  return descriptors.map((d) => ({
+    type: "object" as const,
+    id: `object:${d.kind}:${d.db}.${d.name}`,
+    db: d.db,
+    name: d.name,
+    kind: d.kind,
+    lastOpenedAt: d.lastOpenedAt,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +482,10 @@ export function itemSearchText(item: PaletteItem): string {
       return item.name;
     case "object":
       return `${item.db}.${item.name}`;
+    case "history":
+      // Match against what the row shows (single-line snippet) plus the
+      // connection it ran on, not the full multi-KB script.
+      return `${snippet(item.sql)} ${item.connName}`;
   }
 }
 
@@ -437,11 +546,30 @@ export interface PaletteSelection {
   omittedCount: number;
 }
 
-/** Tiebreak between equal scores: table > view > action > session. */
+/**
+ * Tiebreak between equal scores, most to least important:
+ * table > view > routine > trigger > event > action > session > history.
+ * Within one kind the original composition order decides (recency for
+ * recents/history), keeping runs fully deterministic.
+ */
 function rankPriority(item: PaletteItem): number {
-  if (item.type === "object") return item.kind === "table" ? 0 : 1;
-  if (item.type === "action") return 2;
-  return 3;
+  if (item.type === "object") {
+    switch (item.kind) {
+      case "table":
+        return 0;
+      case "view":
+        return 1;
+      case "routine":
+        return 2;
+      case "trigger":
+        return 3;
+      case "event":
+        return 4;
+    }
+  }
+  if (item.type === "action") return 5;
+  if (item.type === "session") return 6;
+  return 7; // history
 }
 
 /**

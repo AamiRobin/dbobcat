@@ -9,15 +9,26 @@ import {
   SCORE_SUBSTRING,
   SCORE_WORD,
   buildActionItems,
+  buildHistoryItems,
   buildObjectItems,
+  buildRecentItems,
   buildSessionItems,
   parseMode,
   scoreItem,
   selectTop,
+  sliceRecentHistory,
   type PaletteItem,
 } from "./palette-items";
 import { SESSION_COLORS } from "./session-groups";
-import type { DatabaseInfo, SavedSession, TableMeta } from "@/types/ipc";
+import type {
+  DatabaseInfo,
+  EventMeta,
+  HistoryEntry,
+  RoutineMeta,
+  SavedSession,
+  TableMeta,
+  TriggerMeta,
+} from "@/types/ipc";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -47,6 +58,19 @@ const obj = (db: string, name: string, kind: "table" | "view" = "table"): Palett
   db,
   name,
   kind,
+});
+
+const history = (
+  id: string,
+  sql: string,
+  connName = "Local",
+  executedAt = "2026-01-01T00:00:00Z",
+): PaletteItem => ({
+  type: "history",
+  id: `history:${id}`,
+  sql,
+  connName,
+  executedAt,
 });
 
 const savedSession = (overrides: Partial<SavedSession>): SavedSession => ({
@@ -79,10 +103,18 @@ describe("parseMode", () => {
     expect(parseMode("@")).toEqual({ mode: "sessions", query: "" });
   });
 
+  test("leading # selects history and strips prefix + one space", () => {
+    expect(parseMode("#select")).toEqual({ mode: "history", query: "select" });
+    expect(parseMode("# select")).toEqual({ mode: "history", query: "select" });
+    expect(parseMode("#")).toEqual({ mode: "history", query: "" });
+  });
+
   test("plain text stays unified verbatim", () => {
     expect(parseMode("users")).toEqual({ mode: "unified", query: "users" });
     expect(parseMode("  lead")).toEqual({ mode: "unified", query: "  lead" });
     expect(parseMode("a > b")).toEqual({ mode: "unified", query: "a > b" });
+    // Only the LEADING character selects a mode.
+    expect(parseMode("a #b")).toEqual({ mode: "unified", query: "a #b" });
     expect(parseMode("")).toEqual({ mode: "unified", query: "" });
   });
 });
@@ -225,6 +257,49 @@ describe("selectTop", () => {
     expect(reordered.items.map((i) => i.type)).toEqual(first.items.map((i) => i.type));
   });
 
+  test("phase-2 tiebreak extension: table > view > routine > trigger > event … history last", () => {
+    // Every fixture lands on the WORD tier for "alpha" ("db.alpha",
+    // "x-alpha", and a snippet containing the word) so only rankPriority
+    // separates them.
+    const items: PaletteItem[] = [
+      history("h1", "SELECT alpha FROM t"),
+      session("s1", "x-alpha"),
+      {
+        type: "object",
+        id: "object:event:db.alpha",
+        db: "db",
+        name: "alpha",
+        kind: "event",
+      },
+      {
+        type: "object",
+        id: "object:trigger:db.alpha",
+        db: "db",
+        name: "alpha",
+        kind: "trigger",
+      },
+      {
+        type: "object",
+        id: "object:routine:db.alpha",
+        db: "db",
+        name: "alpha",
+        kind: "routine",
+      },
+      obj("db", "alpha_view", "view"), // "db.alpha_view": word "alpha…" → word tier too
+      obj("db", "alpha_table", "table"),
+    ];
+    const ranked = selectTop(items, "alpha").items;
+    expect(ranked.map((i) => (i.type === "object" ? i.kind : i.type))).toEqual([
+      "table",
+      "view",
+      "routine",
+      "trigger",
+      "event",
+      "session",
+      "history",
+    ]);
+  });
+
   test("cap applies after ranking, omittedCount counts ranked survivors", () => {
     const items = [
       session("s1", "bbb"), // prefix 80
@@ -325,7 +400,7 @@ describe("buildObjectItems", () => {
     expect(items.find((i) => i.name === "v_orders")?.kind).toBe("view");
   });
 
-  test("v1 scope keeps tables/views only (exotics skipped)", () => {
+  test("exotics stay skipped (system tables, materialized views)", () => {
     const items = buildObjectItems(dbs, tablesByDb);
     expect(items.some((i) => i.name === "mysql_internals")).toBe(false);
     expect(items.some((i) => i.name === "mv_stats")).toBe(false);
@@ -339,5 +414,125 @@ describe("buildObjectItems", () => {
       ],
     });
     expect(new Set(items.map((i) => i.id)).size).toBe(2);
+  });
+
+  test("second wave fans out routines (with routineKind), triggers and events", () => {
+    const routinesByDb: Record<string, RoutineMeta[] | undefined> = {
+      app: [
+        { name: "calc_total", kind: "function" },
+        { name: "do_sync", kind: "procedure" },
+      ],
+    };
+    const triggersByDb: Record<string, TriggerMeta[] | undefined> = {
+      shop: [{ name: "orders_audit", timing: "AFTER", event: "INSERT", table: "orders" }],
+    };
+    const eventsByDb: Record<string, EventMeta[] | undefined> = {
+      shop: [{ name: "nightly_rollup", status: "ENABLED" }],
+    };
+
+    const items = buildObjectItems(dbs, tablesByDb, routinesByDb, triggersByDb, eventsByDb);
+    const routineItems = items.filter((i) => i.kind === "routine");
+    expect(routineItems.map((i) => `${i.db}.${i.name}`)).toEqual([
+      "app.calc_total",
+      "app.do_sync",
+    ]);
+    expect(routineItems[0]?.routineKind).toBe("function");
+    expect(routineItems[1]?.routineKind).toBe("procedure");
+
+    const triggerItem = items.find((i) => i.kind === "trigger");
+    expect(triggerItem?.db).toBe("shop");
+    expect(triggerItem?.name).toBe("orders_audit");
+    // Triggers carry no routineKind.
+    expect(triggerItem?.routineKind).toBeUndefined();
+
+    const eventItem = items.find((i) => i.kind === "event");
+    expect(eventItem?.name).toBe("nightly_rollup");
+
+    // All ids remain unique across kinds.
+    expect(new Set(items.map((i) => i.id)).size).toBe(items.length);
+  });
+
+  test("omitted second-wave pools simply contribute no rows", () => {
+    const items = buildObjectItems(dbs, tablesByDb);
+    expect(items.every((i) => i.kind === "table" || i.kind === "view")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// History builders
+// ---------------------------------------------------------------------------
+
+describe("history builders", () => {
+  const entry = (
+    id: string,
+    sql: string,
+    executedAt: string,
+    connName = "Local",
+  ): HistoryEntry => ({ id, sql, connName, executedAt });
+
+  test("buildHistoryItems maps entries to namespaced palette rows", () => {
+    const [item] = buildHistoryItems([entry("e1", "SELECT 1", "2026-01-01T00:00:00Z", "Prod")]);
+    expect(item.type).toBe("history");
+    expect(item.id).toBe("history:e1");
+    expect(item.sql).toBe("SELECT 1");
+    expect(item.connName).toBe("Prod");
+    expect(item.executedAt).toBe("2026-01-01T00:00:00Z");
+  });
+
+  test("sliceRecentHistory keeps the newest entries regardless of input order", () => {
+    const entries = [
+      entry("old", "SELECT 1", "2025-06-01T00:00:00Z"),
+      entry("newest", "SELECT 4", "2026-03-01T00:00:00Z"),
+      entry("mid", "SELECT 3", "2026-02-01T00:00:00Z"),
+      entry("older", "SELECT 2", "2025-12-01T00:00:00Z"),
+    ];
+    const sliced = sliceRecentHistory(entries, 2);
+    expect(sliced.map((e) => e.id)).toEqual(["newest", "mid"]);
+  });
+
+  test("sliceRecentHistory default limit is 8", () => {
+    const entries = Array.from({ length: 12 }, (_, i) =>
+      entry(`e${i}`, `SELECT ${i}`, `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`),
+    );
+    expect(sliceRecentHistory(entries)).toHaveLength(8);
+  });
+
+  test("history rows flow through scoreItem/selectTop like everything else", () => {
+    const item = history("h", "SELECT * FROM user_logs LIMIT 10", "Prod box");
+    // Underscores are word separators, so "logs" hits the word tier…
+    expect(scoreItem(item, "logs")).toBe(SCORE_WORD);
+    // …while the full "user_logs" matches mid-text (substring).
+    expect(scoreItem(item, "user_logs")).toBe(SCORE_SUBSTRING);
+    // The connection name participates in matching too.
+    expect(scoreItem(item, "prod")).toBe(SCORE_WORD);
+
+    const ranked = selectTop([session("s", "unrelated"), item], "user_logs");
+    expect(ranked.items.map((i) => i.id)).toEqual(["history:h"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recents → palette rows
+// ---------------------------------------------------------------------------
+
+describe("buildRecentItems", () => {
+  test("maps descriptors to object rows stamped with lastOpenedAt", () => {
+    const items = buildRecentItems([
+      { kind: "view", db: "app", name: "v_orders", lastOpenedAt: "2026-08-01T10:00:00Z" },
+      { kind: "table", db: "shop", name: "orders", lastOpenedAt: "2026-08-02T09:00:00Z" },
+    ]);
+    expect(items.map((i) => i.id)).toEqual([
+      "object:view:app.v_orders",
+      "object:table:shop.orders",
+    ]);
+    expect(items.every((i) => i.lastOpenedAt !== undefined)).toBe(true);
+  });
+
+  test("recents keep descriptor order (LRU order passes straight through)", () => {
+    const items = buildRecentItems([
+      { kind: "table", db: "a", name: "z_first", lastOpenedAt: "2026-01-01T00:00:00Z" },
+      { kind: "table", db: "b", name: "a_second", lastOpenedAt: "2025-01-01T00:00:00Z" },
+    ]);
+    expect(items[0]?.name).toBe("z_first");
   });
 });

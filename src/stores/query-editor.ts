@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import type { QueryOutcome } from "@/types/ipc";
-import { useTabsStore } from "@/stores/tabs";
+import { useTabsStore, type Tab } from "@/stores/tabs";
 
 /**
  * Per-query-tab editor state, kept OUT of React so switching tabs (which
@@ -84,3 +84,15 @@ useTabsStore.subscribe((next, prev) => {
     }
   }
 });
+
+/**
+ * Open a fresh query tab whose editor starts with `sql` (palette history
+ * reuse). Seeding through the store BEFORE the tab mounts works because
+ * QueryView reads `sql` from here on first render — no post-mount patching,
+ * no extra tab-meta plumbing.
+ */
+export function openQueryTabWithSql(sql: string): Tab {
+  const tab = useTabsStore.getState().openTab("query");
+  useQueryEditorStore.getState().patch(tab.id, { sql });
+  return tab;
+}
