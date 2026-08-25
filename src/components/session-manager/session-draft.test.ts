@@ -171,3 +171,46 @@ describe("phase 9-B metadata marshaling", () => {
     expect(validateDraft(draft, { password: "", sshPassword: "" })).toBeNull();
   });
 });
+
+describe("transactions defaults marshaling (Phase 1)", () => {
+  test("txMode/isolation round-trip on server engines", () => {
+    const saved: SavedSession = {
+      ...baseMysql(),
+      txMode: "manual",
+      isolation: "repeatable_read",
+    };
+    const wire = draftToSession(draftFromSession(saved));
+    expect(wire.txMode).toBe("manual");
+    expect(wire.isolation).toBe("repeatable_read");
+
+    // Round-trip through the draft again keeps the values.
+    const reloaded = draftFromSession(wire);
+    expect(reloaded.txMode).toBe("manual");
+    expect(reloaded.isolationDefault).toBe("repeatable_read");
+  });
+
+  test("unset tx defaults stay null; new drafts start unset", () => {
+    const wire = draftToSession(draftFromSession(baseMysql()));
+    expect(wire.txMode).toBeNull();
+    expect(wire.isolation).toBeNull();
+
+    const fresh = newDraft("postgres");
+    expect(fresh.txMode).toBe("");
+    expect(fresh.isolationDefault).toBe("");
+    const freshWire = draftToSession(fresh);
+    expect(freshWire.txMode).toBeNull();
+    expect(freshWire.isolation).toBeNull();
+  });
+
+  test("SQLite sessions never carry tx defaults", () => {
+    const draft = draftWithEngine(
+      draftFromSession({ ...baseMysql(), txMode: "manual", isolation: "serializable" }),
+      "sqlite",
+    );
+    // Engine switch keeps the field values, but the SQLite wire shape drops them.
+    const wire = draftToSession(draft);
+    expect(wire.dbType).toBe("sqlite");
+    expect(wire.txMode).toBeNull();
+    expect(wire.isolation).toBeNull();
+  });
+});

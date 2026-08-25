@@ -128,6 +128,13 @@ export const en = {
     "Ping interval in seconds, 0 disables. If the link drops, the app reconnects silently.",
   "session.form.keepAliveSqliteHint":
     "Keep-alive does not apply to SQLite sessions (local file).",
+  "session.form.txMode": "Transactions",
+  "session.form.txMode.auto": "Auto",
+  "session.form.txMode.manual": "Manual",
+  "session.form.txModeHint": "Manual opens an explicit transaction you commit yourself.",
+  "session.form.isolation": "Isolation level",
+  "session.form.isolation.default": "Server default",
+  "session.form.isolationHint": "Applied to the session at connect time.",
   "session.form.passwordHint":
     "Leave the password blank to keep the stored one. Passwords are kept in an encrypted local file, never in the session itself.",
   "session.form.database": "Database",

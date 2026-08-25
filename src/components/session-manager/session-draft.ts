@@ -1,4 +1,4 @@
-import type { DbType, SavedSession, SslMode } from "@/types/ipc";
+import type { DbType, IsolationLevel, SavedSession, SslMode, TxMode } from "@/types/ipc";
 
 /** Flat editor state for the session dialog form. */
 export interface SessionDraft {
@@ -30,6 +30,11 @@ export interface SessionDraft {
    * explicit 0 disables. SQLite ignores it entirely.
    */
   keepAliveSec: number | "";
+  // Transactions UI Phase 1 defaults (server engines only; SQLite hides them).
+  /** Initial transaction mode; "" = auto-commit (backend default). */
+  txMode: TxMode | "";
+  /** Isolation level applied at connect; "" = server default. */
+  isolationDefault: IsolationLevel | "";
 }
 
 /** Secret fields kept out of the draft so they never round-trip the UI. */
@@ -73,6 +78,8 @@ export function newDraft(engine: DbType = "mysql"): SessionDraft {
     color: null,
     comment: "",
     keepAliveSec: "",
+    txMode: "",
+    isolationDefault: "",
   };
 }
 
@@ -115,6 +122,8 @@ export function draftFromSession(session: SavedSession): SessionDraft {
     color: session.color ?? null,
     comment: session.comment ?? "",
     keepAliveSec: session.keepAliveSec ?? "",
+    txMode: session.txMode ?? "",
+    isolationDefault: session.isolation ?? "",
   };
 }
 
@@ -150,6 +159,9 @@ export function draftToSession(draft: SessionDraft): SavedSession {
     color: draft.color,
     comment: draft.comment.trim() === "" ? null : draft.comment.trim(),
     keepAliveSec: draft.keepAliveSec === "" ? null : draft.keepAliveSec,
+    // Transactions defaults are server-engine only — SQLite never carries them.
+    txMode: sqlite ? null : draft.txMode === "" ? null : draft.txMode,
+    isolation: sqlite ? null : draft.isolationDefault === "" ? null : draft.isolationDefault,
   };
 }
 

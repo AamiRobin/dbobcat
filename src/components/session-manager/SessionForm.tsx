@@ -21,10 +21,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ipc } from "@/lib/ipc";
+import { cn } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { SESSION_COLORS } from "@/lib/session-groups";
-import { cn } from "@/lib/utils";
-import type { DbType, TestResult } from "@/types/ipc";
+import type { IsolationLevel, DbType, TestResult } from "@/types/ipc";
 
 import {
   draftWithEngine,
@@ -57,6 +57,14 @@ const ENGINE_CARDS: Array<{
 const SQLITE_FILE_FILTERS = [
   { name: "SQLite database (*.sqlite;*.db;*.sqlite3)", extensions: ["sqlite", "db", "sqlite3"] },
 ];
+
+/** Isolation-level display labels for the session form Select. */
+const isolationLabels: Record<IsolationLevel, string> = {
+  "read_uncommitted": t("tx.isolation.readUncommitted"),
+  "read_committed": t("tx.isolation.readCommitted"),
+  "repeatable_read": t("tx.isolation.repeatableRead"),
+  serializable: t("tx.isolation.serializable"),
+};
 
 export function SessionForm({
   draft,
@@ -438,28 +446,92 @@ export function SessionForm({
         </Field>
 
         {server ? (
-          <Field className="gap-1.5">
-            <FieldLabel htmlFor="session-keepalive" className="text-xs text-muted-foreground">
-              {t("session.form.keepAlive")}
-            </FieldLabel>
-            <Input
-              id="session-keepalive"
-              type="number"
-              className="w-32 font-mono"
-              value={draft.keepAliveSec === "" ? "" : draft.keepAliveSec}
-              min={0}
-              max={86400}
-              placeholder="20"
-              onChange={(e) =>
-                patch({
-                  keepAliveSec: e.target.value === "" ? "" : Number(e.target.value),
-                })
-              }
-            />
-            <FieldDescription className="text-[11px]">
-              {t("session.form.keepAliveHint")}
-            </FieldDescription>
-          </Field>
+          <>
+            <Field className="gap-1.5">
+              <FieldLabel htmlFor="session-keepalive" className="text-xs text-muted-foreground">
+                {t("session.form.keepAlive")}
+              </FieldLabel>
+              <Input
+                id="session-keepalive"
+                type="number"
+                className="w-32 font-mono"
+                value={draft.keepAliveSec === "" ? "" : draft.keepAliveSec}
+                min={0}
+                max={86400}
+                placeholder="20"
+                onChange={(e) =>
+                  patch({
+                    keepAliveSec: e.target.value === "" ? "" : Number(e.target.value),
+                  })
+                }
+              />
+              <FieldDescription className="text-[11px]">
+                {t("session.form.keepAliveHint")}
+              </FieldDescription>
+            </Field>
+
+            {/* Transactions Phase 1: per-connection tx defaults */}
+            <div className="grid grid-cols-[140px_1fr] items-end gap-3">
+              <Field className="gap-1.5">
+                <FieldLabel className="text-xs text-muted-foreground">
+                  {t("session.form.txMode")}
+                </FieldLabel>
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="sm"
+                  value={draft.txMode === "" ? "auto" : draft.txMode}
+                  onValueChange={(v) =>
+                    v && patch({ txMode: v as SessionDraft["txMode"] })
+                  }
+                  className="w-full grid grid-cols-2"
+                >
+                  <ToggleGroupItem value="auto" className="text-xs">
+                    {t("session.form.txMode.auto")}
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="manual" className="text-xs">
+                    {t("session.form.txMode.manual")}
+                  </ToggleGroupItem>
+                </ToggleGroup>
+                <FieldDescription className="text-[11px]">
+                  {t("session.form.txModeHint")}
+                </FieldDescription>
+              </Field>
+
+              <Field className="gap-1.5">
+                <FieldLabel className="text-xs text-muted-foreground">
+                  {t("session.form.isolation")}
+                </FieldLabel>
+                <Select
+                  value={draft.isolationDefault}
+                  onValueChange={(v) => patch({ isolationDefault: v as SessionDraft["isolationDefault"] })}
+                >
+                  <SelectTrigger id="session-isolation" className="w-full text-xs">
+                    {draft.isolationDefault === "" ? (
+                      t("session.form.isolation.default")
+                    ) : (
+                      isolationLabels[draft.isolationDefault]
+                    )}
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="" className="text-xs">
+                      {t("session.form.isolation.default")}
+                    </SelectItem>
+                    {(Object.keys(isolationLabels) as Array<keyof typeof isolationLabels>).map(
+                      (level) => (
+                        <SelectItem key={level} value={level} className="text-xs">
+                          {isolationLabels[level]}
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectContent>
+                </Select>
+                <FieldDescription className="text-[11px]">
+                  {t("session.form.isolationHint")}
+                </FieldDescription>
+              </Field>
+            </div>
+          </>
         ) : (
           <p className="text-[11px] text-muted-foreground/70">{t("session.form.keepAliveSqliteHint")}</p>
         )}
