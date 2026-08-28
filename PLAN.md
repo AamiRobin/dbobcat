@@ -157,19 +157,18 @@ src-tauri/src/
     server.rs
 ```
 
-## 8. Roadmap (each phase ends demoable)
-
-| Phase | Name | Scope |
-|---|---|---|
-| P0 | Foundation | Tailwind v4 + shadcn init, app shell (panels, tab system, menus, dark mode), state/IPC conventions, Rust module skeleton + error types, settings store |
-| P1 | Connect & browse | Session manager dialog (CRUD, encrypted passwords, SSH tunnel, SSL), MySQL connect, lazy DB tree + context menus, basic server info |
-| P2 | Data grid | Virtualized grid, pagination/sort/filter, inline edit + changeset posting, NULL handling, BLOB viewer, row copy/paste, grid export (CSV quick version) |
-| P3 | Query editor | CodeMirror, schema-driven autocompletion, multi-statement + multiple result tabs, message panel, formatter, query history |
-| P4 | Table designer + object editors | Columns/indexes/FK/options with ALTER preview, create/copy/rename/drop, views/routines/triggers/events code tabs, bulk table ops, maintenance dialogs |
-| P5 | Export/Import | Full SQL dump tool (struct/data, gzip, clipboard/file/server→server), all export formats, CSV import wizard, batch file insert |
-| P6 | More engines | PostgreSQL + SQLite behind the `DbConnection` trait, per-dialect SQL generation |
-| P7 | Server tools | User manager, process list + kill, find-text-on-server, variables/status dashboards, MSSQL |
-| P8 | Polish | Shortcuts, CLI args/deep-link sessions, auto-updater, installers (MSI/DMG/deb/AppImage), i18n groundwork, docs site |
+| Phase | Name | Scope | Status |
+|---|---|---|---|
+| P0 | Foundation | Tailwind v4 + shadcn init, app shell (panels, tab system, menus, dark mode), state/IPC conventions, Rust module skeleton + error types, settings store | Shipped |
+| P1 | Connect & browse | Session manager dialog (CRUD, encrypted passwords, SSH tunnel, SSL), MySQL connect, lazy DB tree + context menus, basic server info | Shipped |
+| P2 | Data grid | Virtualized grid, pagination/sort/filter, inline edit + changeset posting, NULL handling, BLOB viewer, row copy/paste, grid export (CSV quick version) | Shipped |
+| P3 | Query editor | CodeMirror, schema-driven autocompletion, multi-statement + multiple result tabs, message panel, formatter, query history | Shipped |
+| P4 | Table designer + object editors | Columns/indexes/FK/options with ALTER preview, create/copy/rename/drop, views/routines/triggers/events code tabs, bulk table ops, maintenance dialogs | Shipped |
+| P5 | Export/Import | Full SQL dump tool (struct/data, gzip, clipboard/file/server→server), all export formats, CSV import wizard, batch file insert | Shipped |
+| P6 | More engines | PostgreSQL + SQLite behind the `DbConnection` trait, per-dialect SQL generation | Shipped |
+| P7 | Server tools | User manager, process list + kill, find-text-on-server, variables/status dashboards | Shipped |
+| P8 | Polish | Shortcuts, CLI args/deep-link sessions, auto-updater, installers (MSI/DMG/deb/AppImage), i18n groundwork, docs site | Shipped |
+| P9 | MSSQL | `tiberius` driver, MSSQL-specific DDL/dialect work, manager/process queries for SQL Server | Backlog (deliberately deferred per PLAN §1) |
 
 ## 9. Risks & Mitigations
 

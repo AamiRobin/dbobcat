@@ -16,6 +16,8 @@ Murmeli (Swiss-German for *marmot*) is an open-source, cross-platform database G
 - **Table designer** with columns/indexes/foreign keys and an ALTER preview before applying
 - **Full export matrix** — SQL dump, CSV, HTML, XML, JSON, LaTeX, Markdown, PHP, Textile; gzip; clipboard; plus CSV import
 - **Server tools** — user manager, process list, find text across tables, copy table
+- **Schema diagram** — auto-laid-out ER view of a database with export to SVG/PNG
+- **Command palette** (Mod+K), SQL snippets, per-connection transaction defaults
 - Multi-engine via a driver abstraction (one tokio task per connection)
 
 ## Tech stack
