@@ -6,7 +6,7 @@
 
 Murmeli (Swiss-German for *marmot*) is an open-source, cross-platform database GUI client for MySQL/MariaDB, PostgreSQL, and SQLite — inspired by [HeidiSQL](https://www.heidisql.com/), built with a modern stack.
 
-> Repository URL placeholder: `https://github.com/amirobin/murmeli` (not yet public)
+Repository: <https://github.com/amirobin/murmeli>
 
 ## Features
 

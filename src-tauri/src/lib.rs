@@ -133,6 +133,25 @@ pub fn run() {
                     // surfaces "auto-update unavailable" via the frontend's
                     // error handling.
                     if app.config().plugins.0.contains_key("updater") {
+                        // Refuse to register the updater when the release
+                        // overlay forgot to substitute the placeholder pubkey
+                        // (would otherwise bake a literal
+                        // "__TAURI_UPDATER_PUBLIC_KEY__" into the binary).
+                        const PLACEHOLDER: &str = "__TAURI_UPDATER_PUBLIC_KEY__";
+                        let pubkey_unsubstituted = app
+                            .config()
+                            .plugins
+                            .0
+                            .get("updater")
+                            .and_then(|v| v.get("pubkey"))
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|s| s.contains(PLACEHOLDER));
+                        if pubkey_unsubstituted {
+                            return Err(Box::new(std::io::Error::other(
+                                "updater pubkey is still the release.yml placeholder; \
+                                 set TAURI_UPDATER_PUBLIC_KEY in the build environment",
+                            )));
+                        }
                         app.handle()
                             .plugin(tauri_plugin_updater::Builder::new().build())?;
                     }
