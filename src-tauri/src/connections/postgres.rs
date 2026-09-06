@@ -481,11 +481,12 @@ pub(crate) fn hex_decode_bytea(text: &str) -> Result<Vec<u8>> {
         )));
     }
     let mut out = Vec::with_capacity(hex.len() / 2);
-    for pair in hex.as_bytes().chunks_exact(2) {
+    for pair in hex.as_bytes().as_chunks::<2>().0 {
         let hi = (pair[0] as char).to_digit(16).unwrap_or(0) as u8;
         let lo = (pair[1] as char).to_digit(16).unwrap_or(0) as u8;
         out.push(hi << 4 | lo);
     }
+    debug_assert!(hex.as_bytes().as_chunks::<2>().1.is_empty());
     Ok(out)
 }
 
