@@ -188,7 +188,7 @@ impl PgConnection {
         let rows = self
             .client
             .query(
-                "SELECT to_regclass(format('%I.%I', $1, $2))::oid",
+                "SELECT to_regclass(format('%I.%I', $1::text, $2::text))::oid",
                 &[&db, &table],
             )
             .await?;
@@ -196,7 +196,6 @@ impl PgConnection {
             .and_then(|r| r.try_get::<_, Option<u32>>(0).ok().flatten())
             .ok_or_else(|| AppError::Db(format!("relation {db}.{table} not found")))
     }
-
     /// Full column metadata straight from the catalogs.
     async fn load_columns(&self, relid: u32) -> Result<Vec<PgColumn>> {
         let rows = self

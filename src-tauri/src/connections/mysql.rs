@@ -472,8 +472,14 @@ fn table_kind_from_mysql_type(table_type: &str) -> TableKind {
 /// The MySQL binary charset id (63) marks BLOB/BINARY/BIT/GEOMETRY payloads.
 const CHARSET_BINARY: u16 = 63;
 
-/// Decide whether raw `Value::Bytes` for a column is binary or text.
 fn is_binary_column(col: &Column) -> bool {
+    // DECIMAL/NEWDECIMAL arrives as text bytes that happen to be in the
+    // binary charset — treat as text so the UI gets a parseable string
+    // (Numeric is not a RowValue variant today; the data grid shows the
+    // text representation and the consumer parses it on demand).
+    if matches!(col.column_type(), ColumnType::MYSQL_TYPE_NEWDECIMAL) {
+        return false;
+    }
     if col.character_set() == CHARSET_BINARY {
         // JSON columns also report the binary charset but are always text.
         return col.column_type() != ColumnType::MYSQL_TYPE_JSON;

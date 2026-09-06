@@ -19,7 +19,7 @@
 #![allow(dead_code)]
 
 mod commands;
-mod connections;
+pub mod connections;
 mod credentials;
 mod error;
 mod export;
