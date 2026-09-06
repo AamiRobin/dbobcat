@@ -84,7 +84,7 @@ export function TabsBar() {
   const openTab = useTabsStore((s) => s.openTab);
 
   return (
-    <div className="flex h-9 shrink-0 items-stretch gap-0.5 border-b bg-muted/40 px-1">
+    <div className="flex h-9 shrink-0 items-stretch gap-0.5 border-b bg-background px-1">
       <div className="flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto">
         {tabs.map((tab) => {
           const Icon =

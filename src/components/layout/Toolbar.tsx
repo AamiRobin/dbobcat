@@ -44,17 +44,22 @@ function NewTabMenu() {
   return (
     <div className="flex items-center">
       <Button
-        variant="outline"
-        size="xs"
-        className="rounded-r-none border-r-0"
+        variant="ghost"
+        size="sm"
+        className="gap-1.5 rounded-r-none"
         onClick={() => openTab("query")}
       >
-        <Plus data-icon="inline-start" />
+        <Plus />
         <span>{t("toolbar.newQuery")}</span>
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="icon-xs" className="rounded-l-none">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="rounded-l-none"
+            aria-label={t("tabs.newTab")}
+          >
             <ChevronDown />
           </Button>
         </DropdownMenuTrigger>
@@ -93,150 +98,59 @@ export function Toolbar() {
   const status = useConnectionStore((s) => s.status);
   const connId = useConnectionStore((s) => s.connId);
   const dialect = useConnectionStore((s) => s.serverInfo?.dialect ?? null);
-  const sessionColor = useConnectionStore((s) => s.session?.color ?? null);
 
   // Server tools exist on MySQL/PostgreSQL only (P7 scope: SQLite skipped).
   const serverToolsReady = status === "connected" && connId !== null && dialect !== "sqlite";
 
   return (
-    <header className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2">
-      {/* Brand mark */}
-      <div className="mr-1 flex items-center gap-2">
-        <div className="flex size-5 items-center justify-center rounded bg-primary text-primary-foreground">
+    <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-muted/30 px-2">
+      {/* Brand */}
+      <div className="flex items-center gap-2 pr-1">
+        <div className="flex size-6 items-center justify-center rounded-md bg-foreground/[0.06] text-foreground">
           <MurmeliGlyph />
         </div>
-        <span className="text-sm font-semibold tracking-tight">Murmeli</span>
+        <span className="text-[13px] font-semibold tracking-tight">Murmeli</span>
       </div>
 
-      <Separator orientation="vertical" className="mx-1 h-5!" />
+      <Separator orientation="vertical" className="h-5" />
 
-      <Button
-        variant="ghost"
-        size="xs"
-        onClick={() => setSessionManagerOpen(true)}
-        aria-label={t("toolbar.connect")}
+      {/* Primary actions — connected, refresh, import, new tab */}
+      <div
+        data-slot="button-group"
+        className="flex h-7 items-center rounded-md border bg-background p-0.5 shadow-xs"
       >
-        <Cable data-icon="inline-start" />
-        {t("toolbar.connect")}
-        {/* Session color dot accent (Phase 9-B) */}
-        {status === "connected" && sessionColor && (
-          <span
-            aria-hidden
-            className="ml-0.5 size-2 rounded-full border border-black/10"
-            style={{ backgroundColor: sessionColor }}
-          />
-        )}
-      </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setSessionManagerOpen(true)}
+          aria-label={t("toolbar.connect")}
+          className="gap-1.5"
+        >
+          <Cable />
+          {t("toolbar.connect")}
+        </Button>
 
-      <NewTabMenu />
+        <Separator orientation="vertical" className="h-4" />
 
-      {/* Shared action path with shortcuts + native menu */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="xs"
-            aria-label={t("toolbar.refresh")}
-            onClick={() => void dispatchAction("tree.refresh")}
-          >
-            <RefreshCw data-icon="inline-start" />
-            {t("toolbar.refresh")}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("toolbar.refresh")} (Ctrl+R)</TooltipContent>
-      </Tooltip>
+        <NewTabMenu />
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="xs"
-            disabled={status !== "connected" || connId === null}
-            onClick={() => connId !== null && openImportWizard({ connId })}
-          >
-            <FileUp data-icon="inline-start" />
-            {t("toolbar.import")}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("toolbar.importHint")}</TooltipContent>
-      </Tooltip>
+        <Separator orientation="vertical" className="h-4" />
 
-      {/* ---- server tools (MySQL / PostgreSQL only) ---- */}
-      {serverToolsReady && (
-        <>
-          <Separator orientation="vertical" className="mx-1 h-5!" />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={t("toolbar.users")}
-                onClick={() => connId !== null && openServerToolTab(connId, "users")}
-              >
-                <Users data-icon="inline-start" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("toolbar.users")}</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={t("toolbar.processes")}
-                onClick={() => connId !== null && openServerToolTab(connId, "processes")}
-              >
-                <Activity data-icon="inline-start" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("toolbar.processes")}</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={t("toolbar.variables")}
-                onClick={() => connId !== null && openServerToolTab(connId, "variables")}
-              >
-                <SlidersHorizontal data-icon="inline-start" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("toolbar.variables")}</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={t("toolbar.findText")}
-                onClick={() => connId !== null && openFindTextDialog({ connId })}
-              >
-                <TextSearch data-icon="inline-start" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("toolbar.findTextHint")}</TooltipContent>
-          </Tooltip>
-        </>
-      )}
-
-      <div className="ml-auto flex items-center">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="icon-xs"
-              aria-label={t("toolbar.palette")}
-              onClick={() => void dispatchAction("palette.open")}
+              size="sm"
+              aria-label={t("toolbar.refresh")}
+              onClick={() => void dispatchAction("tree.refresh")}
+              className="gap-1.5"
             >
-              <Search data-icon="inline-start" />
+              <RefreshCw />
+              {t("toolbar.refresh")}
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {t("toolbar.palette")} ({formatCombo("Mod+K")})
+            {t("toolbar.refresh")} ({formatCombo("Ctrl+R")})
           </TooltipContent>
         </Tooltip>
 
@@ -244,15 +158,126 @@ export function Toolbar() {
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="icon-xs"
-              onClick={() => void dispatchAction("view.toggle-theme")}
-              aria-label={t("toolbar.toggleTheme")}
+              size="sm"
+              disabled={status !== "connected" || connId === null}
+              onClick={() => connId !== null && openImportWizard({ connId })}
+              className="gap-1.5"
             >
-              {theme === "dark" ? <Sun data-icon="inline-start" /> : <Moon data-icon="inline-start" />}
+              <FileUp />
+              {t("toolbar.import")}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{t("toolbar.toggleTheme")}</TooltipContent>
+          <TooltipContent>{t("toolbar.importHint")}</TooltipContent>
         </Tooltip>
+      </div>
+
+      {/* Server tools — only on MySQL / PostgreSQL */}
+      {serverToolsReady && (
+        <>
+          <Separator orientation="vertical" className="h-5" />
+          <div
+            data-slot="button-group"
+            className="flex h-7 items-center rounded-md border bg-background p-0.5 shadow-xs"
+          >
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("toolbar.users")}
+                  onClick={() => connId !== null && openServerToolTab(connId, "users")}
+                >
+                  <Users />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("toolbar.users")}</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("toolbar.processes")}
+                  onClick={() =>
+                    connId !== null && openServerToolTab(connId, "processes")
+                  }
+                >
+                  <Activity />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("toolbar.processes")}</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("toolbar.variables")}
+                  onClick={() =>
+                    connId !== null && openServerToolTab(connId, "variables")
+                  }
+                >
+                  <SlidersHorizontal />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("toolbar.variables")}</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("toolbar.findText")}
+                  onClick={() => connId !== null && openFindTextDialog({ connId })}
+                >
+                  <TextSearch />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("toolbar.findTextHint")}</TooltipContent>
+            </Tooltip>
+          </div>
+        </>
+      )}
+
+      {/* Trailing utility cluster */}
+      <div className="ml-auto flex items-center">
+        <div
+          data-slot="button-group"
+          className="flex h-7 items-center rounded-md border bg-background p-0.5 shadow-xs"
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("toolbar.palette")}
+                onClick={() => void dispatchAction("palette.open")}
+              >
+                <Search />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {t("toolbar.palette")} ({formatCombo("Mod+K")})
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => void dispatchAction("view.toggle-theme")}
+                aria-label={t("toolbar.toggleTheme")}
+              >
+                {theme === "dark" ? <Sun /> : <Moon />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("toolbar.toggleTheme")}</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       <SessionManagerDialog
