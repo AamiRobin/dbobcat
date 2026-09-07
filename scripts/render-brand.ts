@@ -1,34 +1,9 @@
 import { Resvg } from "@resvg/resvg-js";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
-function render(svgPath: string, width: number): { width: number; height: number; pixels: Uint8Array } {
-  const svg = readFileSync(svgPath, "utf8");
-  const resvg = new Resvg(svg, { fitTo: { mode: "width", value: width } });
-  const image = resvg.render();
-  return { width: image.width, height: image.height, pixels: image.pixels };
-}
-
-function alphaStats(pixels: Uint8Array): { opaque: number; translucent: number; transparent: number } {
-  let opaque = 0;
-  let translucent = 0;
-  let transparent = 0;
-  for (let i = 3; i < pixels.length; i += 4) {
-    const a = pixels[i];
-    if (a === 255) opaque += 1;
-    else if (a === 0) transparent += 1;
-    else translucent += 1;
-  }
-  return { opaque, translucent, transparent };
-}
-
-mkdirSync("assets/brand", { recursive: true });
-
-const full = render("assets/brand/dbobcat-mark.svg", 1024);
-writeFileSync("assets/brand/dbobcat-1024.png", new Resvg(readFileSync("assets/brand/dbobcat-mark.svg", "utf8"), { fitTo: { mode: "width", value: 1024 } }).render().asPng());
-console.log(`dbobcat-1024.png ${full.width}x${full.height} alpha=`, alphaStats(full.pixels));
-
-const tiny = render("assets/brand/dbobcat-mark.svg", 16);
-const pngBytes = new Resvg(readFileSync("assets/brand/dbobcat-mark.svg", "utf8"), { fitTo: { mode: "width", value: 16 } }).render().asPng();
-mkdirSync("/tmp/opencode", { recursive: true });
-writeFileSync("/tmp/opencode/dbobcat-16.png", pngBytes);
-console.log(`dbobcat-16.png ${tiny.width}x${tiny.height} bytes=${pngBytes.length} alpha=`, alphaStats(tiny.pixels));
+// Renders the brand mark to the PNG that `bunx tauri icon` consumes
+// (see assets/brand/README.md).
+const svg = readFileSync("assets/brand/dbobcat-mark.svg", "utf8");
+const png = new Resvg(svg, { fitTo: { mode: "width", value: 1024 } }).render().asPng();
+writeFileSync("assets/brand/dbobcat-1024.png", png);
+console.log(`wrote assets/brand/dbobcat-1024.png (${png.length} bytes)`);
