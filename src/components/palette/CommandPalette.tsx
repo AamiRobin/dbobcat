@@ -669,7 +669,7 @@ function PaletteBody({
       />
       <CommandList>
         {!connected && parsed.mode !== "sessions" && parsed.mode !== "history" && (
-          <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground">
+          <p className="px-3 py-2 text-xs leading-snug text-muted-foreground">
             {t("palette.notConnectedHint")}
           </p>
         )}
@@ -917,14 +917,14 @@ function PaletteBody({
         )}
 
         {selection.omittedCount > 0 && (
-          <p className="px-3 py-1.5 text-[11px] text-muted-foreground">
+          <p className="px-3 py-1.5 text-xs text-muted-foreground">
             {t("palette.refine", { count: selection.omittedCount })}
           </p>
         )}
       </CommandList>
 
       {/* Mode / key hints */}
-      <div className="flex items-center gap-3 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-3 border-t px-3 py-1.5 text-xs text-muted-foreground">
         {t("palette.hints")}
       </div>
     </Command>
@@ -988,7 +988,7 @@ function PaletteRow({
       </span>
       {children}
       {meta !== undefined && (
-        <span className="ml-auto truncate pl-2 text-[11px] text-muted-foreground">
+        <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">
           {meta}
         </span>
       )}

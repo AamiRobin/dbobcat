@@ -3,13 +3,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { emptyForeignKey } from "@/components/designer/column-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ColumnDef, ForeignKeyMeta } from "@/types/ipc";
 
 const FK_ACTIONS = ["CASCADE", "SET NULL", "NO ACTION", "RESTRICT", "SET DEFAULT"];
@@ -65,11 +59,11 @@ export function ForeignKeysTab({
 
           {/* columns */}
           <div className="mt-2 flex flex-wrap items-center gap-1">
-            <span className="text-[11px] text-muted-foreground">Columns:</span>
+            <span className="text-xs text-muted-foreground">Columns:</span>
             {fk.columns.map((colName) => (
               <span
                 key={colName}
-                className="flex items-center gap-0.5 rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px]"
+                className="flex items-center gap-0.5 rounded bg-secondary px-1.5 py-0.5 font-mono text-xs"
               >
                 {colName}
                 <button
@@ -94,23 +88,26 @@ export function ForeignKeysTab({
               <SelectTrigger
                 size="sm"
                 aria-label="Add local column"
-                className="h-6 font-mono text-[11px] data-placeholder:font-sans"
+                className="h-6 font-mono text-xs data-placeholder:font-sans"
               >
                 <SelectValue placeholder="+ column…" />
               </SelectTrigger>
               <SelectContent>
-                {columns
-                  .filter((c) => !fk.columns.includes(c.name))
-                  .map((c) => (
-                    <SelectItem key={c.name} value={c.name} className="text-xs">
-                      {c.name}
-                    </SelectItem>
-                  ))}
+                <SelectGroup>
+                  {columns
+                    .filter((c) => !fk.columns.includes(c.name))
+                    .map((c) => (
+                      <SelectItem key={c.name} value={c.name} className="text-xs">
+                        {c.name}
+                      </SelectItem>
+                    ))}
+
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>
 
-          <div className="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5 text-[11px] text-muted-foreground">
+          <div className="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
             <span>References</span>
             <div className="flex items-center gap-1">
               <Input
@@ -156,11 +153,14 @@ export function ForeignKeysTab({
                 <SelectValue placeholder="(default)" />
               </SelectTrigger>
               <SelectContent>
-                {FK_ACTIONS.map((a) => (
-                  <SelectItem key={a} value={a} className="text-xs">
-                    {a}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {FK_ACTIONS.map((a) => (
+                    <SelectItem key={a} value={a} className="text-xs">
+                      {a}
+                    </SelectItem>
+                  ))}
+
+                </SelectGroup>
               </SelectContent>
             </Select>
 
@@ -173,11 +173,14 @@ export function ForeignKeysTab({
                 <SelectValue placeholder="(default)" />
               </SelectTrigger>
               <SelectContent>
-                {FK_ACTIONS.map((a) => (
-                  <SelectItem key={a} value={a} className="text-xs">
-                    {a}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {FK_ACTIONS.map((a) => (
+                    <SelectItem key={a} value={a} className="text-xs">
+                      {a}
+                    </SelectItem>
+                  ))}
+
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>

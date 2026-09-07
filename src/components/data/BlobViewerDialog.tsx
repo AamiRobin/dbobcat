@@ -84,7 +84,7 @@ export function BlobViewerDialog({
               {analysis.text}
             </pre>
           ) : (
-            <pre className="font-mono text-[11px] leading-relaxed">{analysis.dump}</pre>
+            <pre className="font-mono text-xs leading-relaxed">{analysis.dump}</pre>
           )}
         </div>
 

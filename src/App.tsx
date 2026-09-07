@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { Group, Panel } from "react-resizable-panels";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -7,7 +6,11 @@ import { AboutDialog } from "@/components/layout/AboutDialog";
 import { ShortcutsDialog } from "@/components/layout/ShortcutsDialog";
 import { DbTree } from "@/components/db-tree/DbTree";
 import { MessageLog } from "@/components/layout/MessageLog";
-import { ResizeHandle } from "@/components/layout/ResizeHandle";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import { StatusBar } from "@/components/layout/StatusBar";
 import { TabContent, NoTabsPlaceholder } from "@/components/layout/TabContent";
 import { TabsBar } from "@/components/layout/TabsBar";
@@ -68,34 +71,34 @@ function EditorArea() {
 
 function MainSplit() {
   return (
-    <Group orientation="horizontal" className="min-h-0">
+    <ResizablePanelGroup orientation="horizontal" className="min-h-0">
       {/* Sidebar tokens (not plain background) so the tree panel reads as a
           distinct layer over the editor/log area, VS Code-style. */}
-      <Panel
+      <ResizablePanel
         defaultSize="22"
         minSize="10"
         className="border-r border-sidebar-border bg-sidebar"
       >
         <DbTree />
-      </Panel>
-      <ResizeHandle />
-      <Panel minSize="30">
-        <Group orientation="vertical" className="min-h-0">
-          <Panel minSize="20">
+      </ResizablePanel>
+      <ResizableHandle />
+      <ResizablePanel minSize="30">
+        <ResizablePanelGroup orientation="vertical" className="min-h-0">
+          <ResizablePanel minSize="20">
             <EditorArea />
-          </Panel>
-          <ResizeHandle direction="vertical" />
+          </ResizablePanel>
+          <ResizableHandle />
           {/*
             The log panel stays a fixed-height strip while "collapsed" — the
             chevron in MessageLog's header toggles the store flag; drag-resize
             still works between minSize and defaultSize.
           */}
-          <Panel defaultSize="26" minSize="7">
+          <ResizablePanel defaultSize="26" minSize="7">
             <MessageLog />
-          </Panel>
-        </Group>
-      </Panel>
-    </Group>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }
 

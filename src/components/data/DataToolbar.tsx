@@ -17,13 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Spinner } from "@/components/ui/spinner";
 import { applyDataChanges } from "@/lib/db-queries";
@@ -249,11 +243,14 @@ export function DataToolbar(props: DataToolbarProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {PAGE_SIZES.map((n) => (
-              <SelectItem key={n} value={String(n)}>
-                {n} rows
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              {PAGE_SIZES.map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  {n} rows
+                </SelectItem>
+              ))}
+
+            </SelectGroup>
           </SelectContent>
         </Select>
         <Button
@@ -308,7 +305,7 @@ function FilterChip({ filter, onClear }: { filter: FilterSpec; onClear: () => vo
       type="button"
       title="Clear filter"
       onClick={onClear}
-      className="mr-1 flex max-w-64 items-center gap-1 rounded-sm bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning hover:bg-warning/25"
+      className="mr-1 flex max-w-64 items-center gap-1 rounded-sm bg-warning/15 px-1.5 py-0.5 text-xs text-warning hover:bg-warning/25"
     >
       <span className="truncate font-mono">{label}</span>
       ×
@@ -395,7 +392,7 @@ function ColumnsMenu({
         <TooltipContent>Show / hide columns</TooltipContent>
       </Tooltip>
       <PopoverContent align="start" className="w-60 p-1.5">
-        <p className="px-1.5 pb-1 pt-0.5 text-[11px] font-medium text-muted-foreground">
+        <p className="px-1.5 pb-1 pt-0.5 text-xs font-medium text-muted-foreground">
           Visible columns
         </p>
         <div className="max-h-72 overflow-y-auto">
@@ -412,7 +409,7 @@ function ColumnsMenu({
                   onToggle(col.name, hidden.has(col.name));
                 }
               }}
-              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-accent/60"
+              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-accent"
             >
               {/* Visual only — the row handles clicks so they never double-fire. */}
               <Checkbox

@@ -44,7 +44,7 @@ export function MessageLog() {
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+          className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
         >
           {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
           <Terminal className="size-3.5" />
@@ -70,7 +70,7 @@ export function MessageLog() {
       {!collapsed && (
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
           <ScrollArea className="h-full">
-            <div className="px-3 py-1.5 font-mono text-[11px] leading-relaxed">
+            <div className="px-3 py-1.5 font-mono text-xs leading-relaxed">
               {logs.length === 0 ? (
                 <p className="text-muted-foreground/60">No messages yet.</p>
               ) : (

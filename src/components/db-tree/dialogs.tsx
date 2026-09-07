@@ -15,13 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { TREE_STALE_TIME, dbKeys, fetchDatabases } from "@/lib/db-queries";
 import {
@@ -217,7 +211,7 @@ function BulkDialogInner({
               >
                 Toggle all
               </Button>
-              <span className="mr-auto self-center text-[11px] text-muted-foreground">
+              <span className="mr-auto self-center text-xs text-muted-foreground">
                 {selected.size} of {tables.length} selected
               </span>
             </>
@@ -323,11 +317,14 @@ function MaintenanceDialogInner({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {MAINTENANCE_OPS.map((o) => (
-                <SelectItem key={o.value} value={o.value} className="text-xs">
-                  {o.label}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {MAINTENANCE_OPS.map((o) => (
+                  <SelectItem key={o.value} value={o.value} className="text-xs">
+                    {o.label}
+                  </SelectItem>
+                ))}
+
+              </SelectGroup>
             </SelectContent>
           </Select>
         </Field>
@@ -343,8 +340,8 @@ function MaintenanceDialogInner({
               key={r.table}
               className="flex items-start gap-2 border-b px-2.5 py-1.5 last:border-b-0"
             >
-              <span className="w-40 shrink-0 truncate font-mono text-[11px]">{r.table}</span>
-              <span className="whitespace-pre-wrap font-mono text-[11px] leading-snug text-muted-foreground">
+              <span className="w-40 shrink-0 truncate font-mono text-xs">{r.table}</span>
+              <span className="whitespace-pre-wrap font-mono text-xs leading-snug text-muted-foreground">
                 {r.resultText}
               </span>
             </div>
@@ -571,7 +568,7 @@ function BulkAlterDialog() {
                         setSelected(next);
                       }
                     }}
-                    className="flex cursor-pointer items-center gap-2 py-0.5 text-xs hover:bg-accent/60"
+                    className="flex cursor-pointer items-center gap-2 py-0.5 text-xs hover:bg-accent"
                   >
                     {/* Visual only — the row owns the click so it never double-fires. */}
                     <Checkbox
@@ -599,16 +596,19 @@ function BulkAlterDialog() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={KEEP} className="text-xs">
-                      (keep)
-                    </SelectItem>
-                    {databaseNames
-                      .filter((d) => d !== request.db)
-                      .map((d) => (
-                        <SelectItem key={d} value={d} className="text-xs">
-                          {d}
-                        </SelectItem>
-                      ))}
+                    <SelectGroup>
+                      <SelectItem value={KEEP} className="text-xs">
+                        (keep)
+                      </SelectItem>
+                      {databaseNames
+                        .filter((d) => d !== request.db)
+                        .map((d) => (
+                          <SelectItem key={d} value={d} className="text-xs">
+                            {d}
+                          </SelectItem>
+                        ))}
+
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </Field>
@@ -622,14 +622,17 @@ function BulkAlterDialog() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={KEEP} className="text-xs">
-                      (keep)
-                    </SelectItem>
-                    {ENGINES.map((e) => (
-                      <SelectItem key={e} value={e} className="text-xs">
-                        {e}
+                    <SelectGroup>
+                      <SelectItem value={KEEP} className="text-xs">
+                        (keep)
                       </SelectItem>
-                    ))}
+                      {ENGINES.map((e) => (
+                        <SelectItem key={e} value={e} className="text-xs">
+                          {e}
+                        </SelectItem>
+                      ))}
+
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </Field>
@@ -643,14 +646,17 @@ function BulkAlterDialog() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={KEEP} className="text-xs">
-                      (keep)
-                    </SelectItem>
-                    {CHARSETS.map((c) => (
-                      <SelectItem key={c} value={c} className="text-xs">
-                        {c}
+                    <SelectGroup>
+                      <SelectItem value={KEEP} className="text-xs">
+                        (keep)
                       </SelectItem>
-                    ))}
+                      {CHARSETS.map((c) => (
+                        <SelectItem key={c} value={c} className="text-xs">
+                          {c}
+                        </SelectItem>
+                      ))}
+
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </Field>

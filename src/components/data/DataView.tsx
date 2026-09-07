@@ -1152,7 +1152,7 @@ function GridFindBar({
         }}
         className="h-6 w-52 rounded-md border bg-background px-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       />
-      <span className="w-20 shrink-0 text-center text-[11px] text-muted-foreground">
+      <span className="w-20 shrink-0 text-center text-xs text-muted-foreground">
         {!hasQuery ? "" : hasMatch ? `${matchIndex + 1} of ${matchCount}` : "no match"}
       </span>
       <Button

@@ -3,13 +3,7 @@ import { History, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   HISTORY_STALE_TIME,
   clearHistory,
@@ -58,39 +52,42 @@ export function QueryHistoryMenu({ onSelect }: { onSelect: (sql: string) => void
           History
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-96">
-        {entries.length === 0 ? (
-          <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-            {history.isLoading ? "Loading…" : "No queries executed yet."}
-          </div>
-        ) : (
-          entries.map((entry) => (
-            <DropdownMenuItem
-              key={entry.id}
-              onClick={() => {
-                onSelect(entry.sql);
-                setOpen(false);
-              }}
-              className="flex-col items-start gap-0.5 py-1.5"
-            >
-              <span className="w-full truncate font-mono text-xs">
-                {snippet(entry.sql)}
-              </span>
-              <span className="text-[10px] text-muted-foreground">
-                {entry.connName || "unknown"} · {formatRelativeTime(entry.executedAt)}
-              </span>
-            </DropdownMenuItem>
-          ))
-        )}
-        {entries.length > 0 && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onClick={() => void onClear()}>
-              <Trash2 />
-              Clear history
-            </DropdownMenuItem>
-          </>
-        )}
+      <DropdownMenuContent>
+        <DropdownMenuGroup>
+          {entries.length === 0 ? (
+            <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+              {history.isLoading ? "Loading…" : "No queries executed yet."}
+            </div>
+          ) : (
+            entries.map((entry) => (
+              <DropdownMenuItem
+                key={entry.id}
+                onClick={() => {
+                  onSelect(entry.sql);
+                  setOpen(false);
+                }}
+                className="flex-col items-start gap-0.5 py-1.5"
+              >
+                <span className="w-full truncate font-mono text-xs">
+                  {snippet(entry.sql)}
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {entry.connName || "unknown"} · {formatRelativeTime(entry.executedAt)}
+                </span>
+              </DropdownMenuItem>
+            ))
+          )}
+          {entries.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => void onClear()}>
+                <Trash2 />
+                Clear history
+              </DropdownMenuItem>
+            </>
+          )}
+
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

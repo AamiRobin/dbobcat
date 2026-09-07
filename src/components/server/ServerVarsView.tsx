@@ -142,7 +142,7 @@ function ServerVarsInner({ connId }: { connId: number }) {
         />
       </TabsContent>
       <TabsContent value="status" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <p className="flex items-center gap-1.5 border-b bg-muted/40 px-3 py-1 text-[11px] text-muted-foreground">
+        <p className="flex items-center gap-1.5 border-b bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
           <Clock className="size-3" />
           Counters since server start
           {uptimeEntry && <> · uptime {formatUptime(Number(uptimeEntry.value))}</>}

@@ -113,7 +113,7 @@ export function QueryResults({
 
       <TabsContent value="messages" className="min-h-0 data-[state=inactive]:hidden">
         <ScrollArea className="h-full">
-          <div className="px-3 py-2 font-mono text-[11px] leading-relaxed">
+          <div className="px-3 py-2 font-mono text-xs leading-relaxed">
             {outcomes.length === 0 && (
               <p className={RESULT_LINE_CLASS}>Nothing executed yet.</p>
             )}
@@ -194,7 +194,7 @@ function PlanView({
   }
   return (
     <ScrollArea className="h-full">
-      <div className="space-y-3 p-3">
+      <div className="flex flex-col gap-3 p-3">
         {plan.map((stmt, i) => (
           <PlanStatement key={i} stmt={stmt} index={i} analyze={analyze} />
         ))}
@@ -215,24 +215,24 @@ function PlanStatement({
   return (
     <div className="overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 border-b bg-muted/40 px-2 py-1.5">
-        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+        <span className="shrink-0 font-mono text-xs text-muted-foreground">
           #{index + 1}
         </span>
-        <code className="min-w-0 flex-1 truncate font-mono text-[11px]" title={stmt.sourceSql}>
+        <code className="min-w-0 flex-1 truncate font-mono text-xs" title={stmt.sourceSql}>
           {stmt.sourceSql}
         </code>
         {stmt.skipped ? (
-          <span className="shrink-0 text-[11px] text-muted-foreground">{stmt.note}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{stmt.note}</span>
         ) : stmt.error ? (
-          <span className="shrink-0 text-[11px] text-destructive">{stmt.error}</span>
+          <span className="shrink-0 text-xs text-destructive">{stmt.error}</span>
         ) : (
-          <span className="shrink-0 text-[11px] text-muted-foreground">
+          <span className="shrink-0 text-xs text-muted-foreground">
             {analyze ? "analyzed" : "planned"} · {formatElapsed(stmt.elapsedMs)}
           </span>
         )}
       </div>
       {!stmt.skipped && !stmt.error && stmt.columns && (
-        <table className="w-full border-collapse font-mono text-[11px]">
+        <table className="w-full border-collapse font-mono text-xs">
           <thead>
             <tr className="border-b bg-muted/20 text-left text-muted-foreground">
               {stmt.columns.map((col) => (

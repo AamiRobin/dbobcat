@@ -69,15 +69,15 @@ export function QueryHelpersPanel({
       <Tabs defaultValue="columns" className="flex h-full min-h-0 gap-0">
         <div className="flex shrink-0 items-center justify-between border-b px-2 py-1">
           <TabsList className="h-6">
-            <TabsTrigger value="columns" className="px-2 text-[11px]">
+            <TabsTrigger value="columns" className="px-2 text-xs">
               <Columns3 data-icon="inline-start" className="size-3!" />
               {t("helpers.columns")}
             </TabsTrigger>
-            <TabsTrigger value="snippets" className="px-2 text-[11px]">
+            <TabsTrigger value="snippets" className="px-2 text-xs">
               <Braces data-icon="inline-start" className="size-3!" />
               {t("helpers.snippets")}
             </TabsTrigger>
-            <TabsTrigger value="reference" className="px-2 text-[11px]">
+            <TabsTrigger value="reference" className="px-2 text-xs">
               <BookMarked data-icon="inline-start" className="size-3!" />
               {t("helpers.reference")}
             </TabsTrigger>
@@ -209,8 +209,8 @@ function ColumnsHelper({
                   setChecked(new Set());
                 }}
                 className={cn(
-                  "w-full truncate rounded px-1.5 py-0.5 text-left font-mono text-[11px]",
-                  table === name ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
+                  "w-full truncate rounded px-1.5 py-0.5 text-left font-mono text-xs",
+                  table === name ? "bg-accent text-accent-foreground" : "hover:bg-accent",
                 )}
               >
                 {name}
@@ -218,19 +218,19 @@ function ColumnsHelper({
             </li>
           ))}
           {filteredTables.length === 0 && (
-            <li className="px-1.5 py-1 text-[11px] text-muted-foreground">{t("helpers.noTables")}</li>
+            <li className="px-1.5 py-1 text-xs text-muted-foreground">{t("helpers.noTables")}</li>
           )}
         </ul>
       </ScrollArea>
 
       <ScrollArea className="min-h-0 flex-1 rounded-md border">
         {table === null ? (
-          <p className="p-2 text-[11px] text-muted-foreground">{t("helpers.pickTable")}</p>
+          <p className="p-2 text-xs text-muted-foreground">{t("helpers.pickTable")}</p>
         ) : (
           <ul className="p-1">
             {(columns.data ?? []).map((col) => (
               <li key={col.name}>
-                <label className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-[11px] hover:bg-accent/60">
+                <label className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs hover:bg-accent">
                   <Checkbox
                     checked={checked.has(col.name)}
                     onCheckedChange={(v) => toggleColumn(col.name, v === true)}
@@ -341,7 +341,7 @@ function SnippetsHelper({
 
       <ScrollArea className="min-h-0 flex-1 rounded-md border">
         {isPending ? null : snippets.length === 0 ? (
-          <p className="p-2 text-[11px] leading-relaxed text-muted-foreground">
+          <p className="p-2 text-xs leading-relaxed text-muted-foreground">
             {t("helpers.snippetsEmpty")}
           </p>
         ) : (
@@ -349,10 +349,10 @@ function SnippetsHelper({
             {snippets.map((snippet) => (
               <li
                 key={snippet.id}
-                className="group flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent/60"
+                className="group flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[11px] font-medium">{snippet.name}</span>
+                  <span className="block truncate text-xs font-medium">{snippet.name}</span>
                   <span className="block truncate font-mono text-[10px] text-muted-foreground/70">
                     {snippet.sql.split("\n")[0]}
                   </span>
@@ -415,7 +415,7 @@ function SnippetsHelper({
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>{t("helpers.saveSelection")}</DialogTitle>
-            <DialogDescription className="line-clamp-3 font-mono text-[11px]">
+            <DialogDescription className="line-clamp-3 font-mono text-xs">
               {saving}
             </DialogDescription>
           </DialogHeader>
@@ -488,7 +488,7 @@ function ReferenceHelper({ insertText }: { insertText: (text: string) => void })
                       <button
                         type="button"
                         onClick={() => insertText(`${fn.name}(`)}
-                        className="w-full truncate rounded px-1 py-0.5 text-left font-mono text-[11px] hover:bg-accent/60"
+                        className="w-full truncate rounded px-1 py-0.5 text-left font-mono text-xs hover:bg-accent"
                       >
                         {fn.signature}
                       </button>

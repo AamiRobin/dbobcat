@@ -120,6 +120,7 @@ export const en = {
   "session.form.password": "Password",
   "session.form.group": "Group",
   "session.form.groupPlaceholder": "Work/Prod",
+  "session.form.groupEmpty": "No matching groups",
   "session.form.color": "Color",
   "session.form.comment": "Comment",
   "session.form.commentPlaceholder": "Note shown in the session list",

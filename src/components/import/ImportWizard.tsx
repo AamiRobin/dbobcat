@@ -23,13 +23,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table as UITable,
   TableBody,
@@ -380,7 +374,7 @@ function ImportWizardInner({
 
             <PreviewGrid preview={preview.data} loading={preview.isPending} />
             {preview.data && (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 ≈{preview.data.totalLinesEst.toLocaleString()} record(s) in total.
               </p>
             )}
@@ -414,11 +408,14 @@ function ImportWizardInner({
                     <SelectValue placeholder={t("import.target.database")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {(databasesQuery.data ?? []).map((d) => (
-                      <SelectItem key={d.name} value={d.name} className="text-xs">
-                        {d.name}
-                      </SelectItem>
-                    ))}
+                    <SelectGroup>
+                      {(databasesQuery.data ?? []).map((d) => (
+                        <SelectItem key={d.name} value={d.name} className="text-xs">
+                          {d.name}
+                        </SelectItem>
+                      ))}
+
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
                 <Select value={targetTable} onValueChange={setTargetTable}>
@@ -426,11 +423,14 @@ function ImportWizardInner({
                     <SelectValue placeholder={t("import.target.table")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {(targetInfo.tables.data ?? []).map((tb) => (
-                      <SelectItem key={tb} value={tb} className="text-xs">
-                        {tb}
-                      </SelectItem>
-                    ))}
+                    <SelectGroup>
+                      {(targetInfo.tables.data ?? []).map((tb) => (
+                        <SelectItem key={tb} value={tb} className="text-xs">
+                          {tb}
+                        </SelectItem>
+                      ))}
+
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </div>
@@ -446,12 +446,12 @@ function ImportWizardInner({
                 />
                 <div className="grid max-h-32 grid-cols-2 gap-x-6 gap-y-1 overflow-auto rounded-md border p-2">
                   {newColumns.map((c) => (
-                    <span key={c.name} className="truncate font-mono text-[11px] text-muted-foreground">
+                    <span key={c.name} className="truncate font-mono text-xs text-muted-foreground">
                       {c.name} <span className="opacity-60">{c.dataType}</span>
                     </span>
                   ))}
                 </div>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Types guessed TEXT/INT/DOUBLE from the first rows; every CSV
                   column will be imported in order.
                 </p>
@@ -491,19 +491,22 @@ function ImportWizardInner({
                           })
                         }
                       >
-                        <SelectTrigger size="sm" className="h-6 w-36 text-[11px]">
+                        <SelectTrigger size="sm" className="h-6 w-36 text-xs">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={SKIP} className="text-[11px]">
-                            {t("import.map.skip")}
-                          </SelectItem>
-                          {(columnMeta ?? []).map((cm) => (
-                            <SelectItem key={cm.name} value={cm.name} className="text-[11px]">
-                              {cm.name}
-                              <span className="ml-1 opacity-50">{cm.dataType}</span>
+                          <SelectGroup>
+                            <SelectItem value={SKIP} className="text-xs">
+                              {t("import.map.skip")}
                             </SelectItem>
-                          ))}
+                            {(columnMeta ?? []).map((cm) => (
+                              <SelectItem key={cm.name} value={cm.name} className="text-xs">
+                                {cm.name}
+                                <span className="ml-1 opacity-50">{cm.dataType}</span>
+                              </SelectItem>
+                            ))}
+
+                          </SelectGroup>
                         </SelectContent>
                       </Select>
                     </label>
@@ -537,7 +540,7 @@ function ImportWizardInner({
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {t(MODE_INFO[mode].hintKey)}.
               </p>
             </div>
@@ -620,8 +623,8 @@ function ImportWizardInner({
                       <TableBody>
                         {result.errors.map((e, i) => (
                           <TableRow key={i}>
-                            <TableCell className="py-1 font-mono text-[11px]">{e.line}</TableCell>
-                            <TableCell className="py-1 text-[11px] text-destructive">
+                            <TableCell className="py-1 font-mono text-xs">{e.line}</TableCell>
+                            <TableCell className="py-1 text-xs text-destructive">
                               {e.message}
                             </TableCell>
                           </TableRow>
@@ -652,7 +655,7 @@ function ImportWizardInner({
               Back
             </Button>
           )}
-          <span className="mr-auto self-center text-[11px] text-muted-foreground">
+          <span className="mr-auto self-center text-xs text-muted-foreground">
             Step {step + 1}/{STEPS.length}
           </span>
           <AlertDialogCancel disabled={run.isPending}>Close</AlertDialogCancel>
@@ -737,7 +740,7 @@ function PreviewGrid({
           {preview.rows.map((row, ri) => (
             <TableRow key={ri}>
               {preview.columns.map((_, ci) => (
-                <TableCell key={ci} className="py-1 font-mono text-[11px]">
+                <TableCell key={ci} className="py-1 font-mono text-xs">
                   {row[ci] ?? <span className="italic opacity-50">NULL</span>}
                 </TableCell>
               ))}

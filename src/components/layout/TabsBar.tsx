@@ -17,12 +17,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -104,7 +99,7 @@ export function TabsBar() {
                 "group/tab my-1 flex cursor-default select-none items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium outline-none transition-colors animate-tab-in",
                 active
                   ? "border-border bg-background text-foreground shadow-xs"
-                  : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
               )}
             >
               <Icon
@@ -128,19 +123,22 @@ export function TabsBar() {
           </TooltipTrigger>
           <TooltipContent>{t("tabs.newTabHint")}</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem onClick={() => openTab("query")}>
-            <FileCode data-icon="inline-start" />
-            {t("tabs.newQuery")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => openTab("data")}>
-            <Table data-icon="inline-start" />
-            {t("tabs.newData")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => openTab("designer")}>
-            <Workflow data-icon="inline-start" />
-            {t("tabs.newDesigner")}
-          </DropdownMenuItem>
+        <DropdownMenuContent>
+          <DropdownMenuGroup>
+            <DropdownMenuItem onClick={() => openTab("query")}>
+              <FileCode data-icon="inline-start" />
+              {t("tabs.newQuery")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openTab("data")}>
+              <Table data-icon="inline-start" />
+              {t("tabs.newData")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openTab("designer")}>
+              <Workflow data-icon="inline-start" />
+              {t("tabs.newDesigner")}
+            </DropdownMenuItem>
+
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

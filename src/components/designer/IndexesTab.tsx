@@ -3,13 +3,7 @@ import { ArrowDown, ArrowUp, Copy, Plus, Trash2, X } from "lucide-react";
 import { emptyIndex } from "@/components/designer/column-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ColumnDef, IndexKind, IndexMeta } from "@/types/ipc";
 
 const KIND_LABELS: Record<IndexKind, string> = {
@@ -91,13 +85,16 @@ export function IndexesTab({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {(Object.keys(KIND_LABELS) as IndexKind[])
-                    .filter((k) => k !== "primary" || ix.kind === "primary")
-                    .map((k) => (
-                      <SelectItem key={k} value={k} className="text-xs">
-                        {KIND_LABELS[k]}
-                      </SelectItem>
-                    ))}
+                  <SelectGroup>
+                    {(Object.keys(KIND_LABELS) as IndexKind[])
+                      .filter((k) => k !== "primary" || ix.kind === "primary")
+                      .map((k) => (
+                        <SelectItem key={k} value={k} className="text-xs">
+                          {KIND_LABELS[k]}
+                        </SelectItem>
+                      ))}
+
+                  </SelectGroup>
                 </SelectContent>
               </Select>
 
@@ -129,7 +126,7 @@ export function IndexesTab({
               {ix.columns.map((colName, ci) => (
                 <li key={colName} className="flex items-center gap-1">
                   <span className="w-5 text-right text-[10px] tabular-nums text-muted-foreground">{ci + 1}</span>
-                  <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px]">{colName}</span>
+                  <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-xs">{colName}</span>
                   <button
                     type="button"
                     onClick={() => moveColumn(i, ci, -1)}
@@ -171,16 +168,19 @@ export function IndexesTab({
                   <SelectTrigger
                     size="sm"
                     aria-label="Add column to index"
-                    className="h-6 w-full font-mono text-[11px] data-placeholder:font-sans"
+                    className="h-6 w-full font-mono text-xs data-placeholder:font-sans"
                   >
                     <SelectValue placeholder="+ add column…" />
                   </SelectTrigger>
                   <SelectContent>
-                    {available.map((name) => (
-                      <SelectItem key={name} value={name} className="text-xs">
-                        {name}
-                      </SelectItem>
-                    ))}
+                    <SelectGroup>
+                      {available.map((name) => (
+                        <SelectItem key={name} value={name} className="text-xs">
+                          {name}
+                        </SelectItem>
+                      ))}
+
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </div>

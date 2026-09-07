@@ -34,7 +34,7 @@ import { TreeDialogs } from "@/components/db-tree/dialogs";
 import { useTreeDialogsStore } from "@/components/db-tree/tree-dialogs-store";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Spinner } from "@/components/ui/spinner";
@@ -202,7 +202,7 @@ function TreeRow({
           onDrop={onDrop}
           onDragEnd={onDragEnd}
           className={cn(
-            "flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-xs transition-colors hover:bg-accent/60",
+            "flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-xs transition-colors hover:bg-accent",
             className,
           )}
         >
@@ -534,18 +534,18 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
       {open && (
         <ul className="ml-4 border-l pl-2">
           {columns.isPending && (
-            <li className="flex items-center gap-1.5 py-0.5 text-[11px] text-muted-foreground">
+            <li className="flex items-center gap-1.5 py-0.5 text-xs text-muted-foreground">
               <Spinner className="size-3" /> Loading columns…
             </li>
           )}
           {columns.isError && (
-            <li className="py-0.5 text-[11px] text-destructive">
+            <li className="py-0.5 text-xs text-destructive">
               {(columns.error as Error).message}
             </li>
           )}
           {(columns.data ?? []).map((column: ColumnMeta) => (
             <li key={column.name}>
-              <div className="flex items-center gap-1 rounded-md px-1 py-0.5 text-[11px] text-muted-foreground">
+              <div className="flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground">
                 {isPrimaryKeyColumn(column) ? (
                   <Key className="size-3 shrink-0 text-warning" />
                 ) : (
@@ -553,7 +553,7 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
                 )}
                 <span className="truncate">{column.name}</span>
                 {/* Plain dim mono text (VS Code-style tree metadata), not a pill. */}
-                <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+                <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">
                   {column.dataType}
                 </span>
               </div>
@@ -643,12 +643,15 @@ function MaintenanceSubmenu({ onPick }: { onPick: (op: (typeof MAINT_OPS)[number
           Maintenance
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="right" align="start">
-        {MAINT_OPS.map(([op, label]) => (
-          <DropdownMenuItem key={op} onClick={() => onPick(op)}>
-            {label}
-          </DropdownMenuItem>
-        ))}
+      <DropdownMenuContent>
+        <DropdownMenuGroup>
+          {MAINT_OPS.map(([op, label]) => (
+            <DropdownMenuItem key={op} onClick={() => onPick(op)}>
+              {label}
+            </DropdownMenuItem>
+          ))}
+
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -679,7 +682,7 @@ function TableGroups({
 
   if (tables.isPending) {
     return (
-      <p className="flex items-center gap-1.5 px-6 py-1 text-[11px] text-muted-foreground">
+      <p className="flex items-center gap-1.5 px-6 py-1 text-xs text-muted-foreground">
         <Spinner className="size-3" /> Loading tables…
       </p>
     );
@@ -687,7 +690,7 @@ function TableGroups({
 
   if (tables.isError) {
     return (
-      <p className="px-6 py-1 text-[11px] leading-snug text-destructive">
+      <p className="px-6 py-1 text-xs leading-snug text-destructive">
         {(tables.error as Error).message}
       </p>
     );
@@ -877,7 +880,7 @@ function GroupShell({
 
 function GroupPendingRow({ what }: { what: string }) {
   return (
-    <li className="flex items-center gap-1.5 py-0.5 pl-6 text-[11px] text-muted-foreground">
+    <li className="flex items-center gap-1.5 py-0.5 pl-6 text-xs text-muted-foreground">
       <Spinner className="size-3" /> Loading {what}…
     </li>
   );
@@ -885,14 +888,14 @@ function GroupPendingRow({ what }: { what: string }) {
 
 function GroupErrorRow({ error }: { error: Error }) {
   return (
-    <li className="py-0.5 pl-6 text-[11px] leading-snug text-destructive">
+    <li className="py-0.5 pl-6 text-xs leading-snug text-destructive">
       {error.message}
     </li>
   );
 }
 
 function EmptyGroupRow({ what }: { what: string }) {
-  return <li className="py-0.5 pl-6 text-[11px] text-muted-foreground">No {what}.</li>;
+  return <li className="py-0.5 pl-6 text-xs text-muted-foreground">No {what}.</li>;
 }
 
 function RoutinesGroup({ connId, database, filtering }: ObjectGroupProps & { filtering?: boolean }) {
@@ -1461,7 +1464,7 @@ export function DbTree() {
         <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 p-4 text-center">
           <Database className="size-8 text-muted-foreground/40" strokeWidth={1.5} />
           <p className="text-xs font-medium text-muted-foreground">Not connected</p>
-          <p className="max-w-36 text-[11px] leading-relaxed text-muted-foreground/70">
+          <p className="max-w-36 text-xs leading-relaxed text-muted-foreground/70">
             Use <span className="font-medium">Connect</span> in the toolbar to open a session.
           </p>
         </div>
@@ -1587,7 +1590,7 @@ function ConnectedTree({ connId }: { connId: number }) {
               placeholder={t("tree.filterPlaceholder")}
               aria-label={t("tree.filterLabel")}
               title={t("tree.filterHint")}
-              className="h-6 border-none bg-transparent pl-6 pr-5 text-[11px] focus-visible:ring-1"
+              className="h-6 border-none bg-transparent pl-6 pr-5 text-xs focus-visible:ring-1"
             />
             {pattern && (
               <button
@@ -1632,7 +1635,7 @@ function ConnectedTree({ connId }: { connId: number }) {
             <p className="px-2 py-2 text-xs text-muted-foreground">No databases visible.</p>
           )}
           {(matcher !== null || favoritesOnly) && dbs.length > 0 && visibleDbs.length === 0 && (
-            <p className="px-2 py-2 text-[11px] text-muted-foreground">
+            <p className="px-2 py-2 text-xs text-muted-foreground">
               {favoritesOnly ? t("tree.noFavorites") : t("tree.noMatches")}
             </p>
           )}

@@ -17,13 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { dbKeys, fetchDatabases, fetchTables, TREE_STALE_TIME } from "@/lib/db-queries";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { findTextCancel, findTextStart, singlePkFilterValue } from "@/lib/server-queries";
@@ -297,7 +291,7 @@ function FindTextDialogInner({
             <Field className="gap-1.5">
               <div className="flex items-center justify-between">
                 <FieldLabel className="text-xs">{t("find.tables")}</FieldLabel>
-                <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <label className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Checkbox checked={tablesOpen} onCheckedChange={() => setTablesOpen((v) => !v)} />
                   {t("find.restrict")}
                 </label>
@@ -309,11 +303,14 @@ function FindTextDialogInner({
                       <SelectValue placeholder="schema" />
                     </SelectTrigger>
                     <SelectContent>
-                      {[...dbs].map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
+                      <SelectGroup>
+                        {[...dbs].map((name) => (
+                          <SelectItem key={name} value={name}>
+                            {name}
+                          </SelectItem>
+                        ))}
+
+                      </SelectGroup>
                     </SelectContent>
                   </Select>
                   <div className="flex flex-col gap-1 max-h-16 overflow-y-auto rounded-md border p-2">
@@ -338,7 +335,7 @@ function FindTextDialogInner({
                   </div>
                 </>
               ) : (
-                <p className="rounded-md border bg-muted/30 p-2 text-[11px] text-muted-foreground">
+                <p className="rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
                   {t("find.allTables")}
                 </p>
               )}
@@ -348,7 +345,7 @@ function FindTextDialogInner({
           {/* progress */}
           {(running || resultMeta) && (
             <div className="flex flex-col gap-1 rounded-md border p-2">
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>
                   {running
                     ? t("find.scanning", { done: doneTables, total: totalTables || "?" })
@@ -409,7 +406,7 @@ function ResultRow({ m, onOpen }: { m: FindTextMatch; onOpen: (m: FindTextMatch)
   return (
     <tr
       className={cn(
-        "cursor-default border-b last:border-0 hover:bg-accent/40",
+        "cursor-default border-b last:border-0 hover:bg-accent",
         canJump && "cursor-pointer",
       )}
       onDoubleClick={() => canJump && onOpen(m)}

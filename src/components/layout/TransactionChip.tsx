@@ -7,16 +7,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { t } from "@/lib/i18n";
 import { notify } from "@/lib/toast";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useConnectionStore } from "@/stores/connection";
 import { useTransactionStore } from "@/stores/transaction";
@@ -98,9 +94,9 @@ export function TransactionChip() {
   if (!tx) {
     // Ledger snapshot not received yet — show the neutral auto state.
     return (
-      <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+      <Badge variant="secondary" className="h-auto rounded-md px-1.5 py-0.5 text-[10px]">
         {t("tx.chip.auto")}
-      </span>
+      </Badge>
     );
   }
 
@@ -155,7 +151,7 @@ export function TransactionChip() {
               {tx.entries.map((entry, i) => (
                 <li
                   key={`${entry.startedMs}-${i}`}
-                  className="flex items-center gap-2 rounded-md px-1 py-1 text-[11px] hover:bg-accent/60"
+                  className="flex items-center gap-2 rounded-md px-1 py-1 text-xs hover:bg-accent"
                 >
                   {(() => {
                     const Icon = KIND_ICON[entry.kind] ?? FileText;
@@ -208,7 +204,7 @@ export function TransactionChip() {
         <div className="flex items-center justify-between gap-2">
           <div className="flex flex-col">
             <Label className="text-xs">{t("tx.popover.mode")}</Label>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {t("tx.popover.modeHint")}
             </span>
           </div>
@@ -229,17 +225,20 @@ export function TransactionChip() {
               {tx.isolation ? isolationLabel(tx.isolation) : t("session.form.isolation.default")}
             </SelectTrigger>
             <SelectContent>
-              {ISOLATION_LEVELS.map((level) => (
-                <SelectItem key={level} value={level} className="text-xs">
-                  {isolationLabel(level)}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {ISOLATION_LEVELS.map((level) => (
+                  <SelectItem key={level} value={level} className="text-xs">
+                    {isolationLabel(level)}
+                  </SelectItem>
+                ))}
+
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
 
         <Separator className="my-2" />
-        <p className="text-[11px] leading-snug text-muted-foreground/70">
+        <p className="text-xs leading-snug text-muted-foreground/70">
           {t("tx.footer.note")}
         </p>
       </PopoverContent>

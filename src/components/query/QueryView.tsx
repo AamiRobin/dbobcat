@@ -13,9 +13,12 @@ import {
   Play,
   TextSelect,
 } from "lucide-react";
-import { Group, Panel } from "react-resizable-panels";
 
-import { ResizeHandle } from "@/components/layout/ResizeHandle";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import { QueryHelpersPanel } from "@/components/query/QueryHelpersPanel";
 import { QueryHistoryMenu } from "@/components/query/QueryHistoryMenu";
 import { QueryResults } from "@/components/query/QueryResults";
@@ -25,18 +28,8 @@ import { SqlEditor, type RunRequestKind } from "@/components/query/SqlEditor";
 import { setActiveQueryRunner } from "@/lib/shortcuts";
 import { hasImplicitCommitDdl } from "@/lib/tx-classify";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -473,16 +466,19 @@ export function QueryView({ tab }: { tab: Tab }) {
             </TooltipTrigger>
             <TooltipContent>Query plan for the whole script</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem className="text-xs" onClick={() => void handleExplain(false)}>
-              <ListTree className="size-3.5" />
-              Explain
-            </DropdownMenuItem>
-            <DropdownMenuItem className="text-xs" onClick={() => void handleExplain(true)}>
-              <ListTree className="size-3.5" />
-              Explain Analyze
-              <span className="ml-1 text-muted-foreground">— executes the statement</span>
-            </DropdownMenuItem>
+          <DropdownMenuContent>
+            <DropdownMenuGroup>
+              <DropdownMenuItem className="text-xs" onClick={() => void handleExplain(false)}>
+                <ListTree className="size-3.5" />
+                Explain
+              </DropdownMenuItem>
+              <DropdownMenuItem className="text-xs" onClick={() => void handleExplain(true)}>
+                <ListTree className="size-3.5" />
+                Explain Analyze
+                <span className="ml-1 text-muted-foreground">— executes the statement</span>
+              </DropdownMenuItem>
+
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -523,14 +519,14 @@ export function QueryView({ tab }: { tab: Tab }) {
                 aria-label={t("helpers.open")}
                 onClick={() => patch(tabId, { helpersOpen: !helpersOpen })}
               >
-                <PanelRight className="size-4" />
+                <PanelRight />
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t("helpers.open")}</TooltipContent>
           </Tooltip>
 
           {formatError && (
-            <span className="max-w-64 truncate text-[11px] text-destructive">
+            <span className="max-w-64 truncate text-xs text-destructive">
               Format: {formatError}
             </span>
           )}
@@ -545,11 +541,14 @@ export function QueryView({ tab }: { tab: Tab }) {
                 {db ?? (databases.isLoading ? "Loading…" : "no database")}
               </SelectTrigger>
               <SelectContent>
-                {(databases.data ?? []).map((d) => (
-                  <SelectItem key={d.name} value={d.name} className="text-xs">
-                    {d.name}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {(databases.data ?? []).map((d) => (
+                    <SelectItem key={d.name} value={d.name} className="text-xs">
+                      {d.name}
+                    </SelectItem>
+                  ))}
+
+                </SelectGroup>
               </SelectContent>
             </Select>
           </label>
@@ -567,15 +566,15 @@ export function QueryView({ tab }: { tab: Tab }) {
 
       {/* editor + results (+ optional helpers panel on the right) */}
       <div className="min-h-0 flex-1">
-        <Group orientation="horizontal" className="h-full min-h-0">
-          <Panel minSize="40" className="min-w-0">
+        <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
+          <ResizablePanel minSize="40" className="min-w-0">
             <div className="h-full min-h-0">
-              <Group
+              <ResizablePanelGroup
                 key={hasResults ? "split" : "full"}
                 orientation="vertical"
                 className="h-full min-h-0"
               >
-                <Panel defaultSize={hasResults ? "55" : "100"} minSize="15" className="min-h-0">
+                <ResizablePanel defaultSize={hasResults ? "55" : "100"} minSize="15" className="min-h-0">
                   <div className="flex h-full min-h-0 flex-col overflow-hidden">
                     <SqlEditor
                       value={qState.sql}
@@ -589,12 +588,12 @@ export function QueryView({ tab }: { tab: Tab }) {
                       }}
                     />
                   </div>
-                </Panel>
+                </ResizablePanel>
 
                 {hasResults && (
                   <>
-                    <ResizeHandle direction="vertical" />
-                    <Panel defaultSize="45" minSize="8" className="min-h-0">
+                    <ResizableHandle />
+                    <ResizablePanel defaultSize="45" minSize="8" className="min-h-0">
                       <QueryResults
                         tabId={tabId}
                         outcomes={qState.outcomes ?? []}
@@ -609,17 +608,17 @@ export function QueryView({ tab }: { tab: Tab }) {
                         planAnalyze={qState.planAnalyze}
                         planNonce={qState.planNonce}
                       />
-                    </Panel>
+                    </ResizablePanel>
                   </>
                 )}
-              </Group>
+              </ResizablePanelGroup>
             </div>
-          </Panel>
+          </ResizablePanel>
 
           {helpersOpen && (
             <>
-              <ResizeHandle />
-              <Panel defaultSize="24" minSize="14" className="min-w-52">
+              <ResizableHandle />
+              <ResizablePanel defaultSize="24" minSize="14" className="min-w-52">
                 {connId !== null && (
                   <QueryHelpersPanel
                     connId={connId}
@@ -631,10 +630,10 @@ export function QueryView({ tab }: { tab: Tab }) {
                     getSelection={getEditorSelection}
                   />
                 )}
-              </Panel>
+              </ResizablePanel>
             </>
           )}
-        </Group>
+        </ResizablePanelGroup>
       </div>
 
       {/* Transactions Phase 1: implicit-commit DDL warning */}

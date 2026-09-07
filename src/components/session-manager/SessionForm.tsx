@@ -10,19 +10,21 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
+import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
@@ -121,26 +123,26 @@ export function SessionForm({
         </Field>
 
         {/* Engine selector */}
-        <div className="grid grid-cols-3 gap-2">
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          value={draft.engine}
+          onValueChange={(v) => v && onChange(draftWithEngine(draft, v as DbType))}
+          className="grid w-full grid-cols-3 gap-2"
+        >
           {ENGINE_CARDS.map(({ value, label, hintKey, icon: Icon }) => (
-            <button
+            <ToggleGroupItem
               key={value}
-              type="button"
-              onClick={() => onChange(draftWithEngine(draft, value))}
-              aria-pressed={draft.engine === value}
-              className={cn(
-                "flex flex-col items-center gap-1 rounded-md border px-2 py-2 text-[11px] transition-colors",
-                draft.engine === value
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground hover:bg-accent",
-              )}
+              value={value}
+              aria-label={label}
+              className="h-auto flex-col gap-1 rounded-md px-2 py-2 text-xs text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-primary/10 data-[state=on]:text-primary [&>span]:text-[10px] [&>span]:opacity-70"
             >
-              <Icon className="size-4" />
+              <Icon />
               <span className="font-medium leading-tight">{label}</span>
               <span className="text-[10px] opacity-70">{t(hintKey)}</span>
-            </button>
+            </ToggleGroupItem>
           ))}
-        </div>
+        </ToggleGroup>
 
         {draft.engine === "sqlite" ? (
           <Field className="gap-1.5">
@@ -166,7 +168,7 @@ export function SessionForm({
                 {t("session.form.browse")}
               </Button>
             </div>
-            <FieldDescription className="text-[11px]">
+            <FieldDescription className="text-xs">
               {t("session.form.sqliteHint")}
             </FieldDescription>
           </Field>
@@ -227,7 +229,7 @@ export function SessionForm({
                 />
               </Field>
             </div>
-            <p className="-mt-2 text-[11px] text-muted-foreground/70">
+            <p className="-mt-2 text-xs text-muted-foreground/70">
               {t("session.form.passwordHint")}
             </p>
 
@@ -282,7 +284,7 @@ export function SessionForm({
                           <Input
                             value={draft[field]}
                             onChange={(e) => patch({ [field]: e.target.value })}
-                            className="h-7 font-mono text-[11px]"
+                            className="h-7 font-mono text-xs"
                             aria-label={label}
                           />
                           <Button
@@ -312,7 +314,7 @@ export function SessionForm({
             <div className="flex items-center justify-between">
               <div className="flex flex-col">
                 <span className="text-sm font-medium">{t("session.form.sshTunnel")}</span>
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   {t("session.form.sshHint")}
                 </span>
               </div>
@@ -382,8 +384,11 @@ export function SessionForm({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="password">Password</SelectItem>
-                  <SelectItem value="key">Private key</SelectItem>
+                  <SelectGroup>
+                    <SelectItem value="password">Password</SelectItem>
+                    <SelectItem value="key">Private key</SelectItem>
+
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </Field>
@@ -440,18 +445,32 @@ export function SessionForm({
             <FieldLabel htmlFor="session-group" className="text-xs text-muted-foreground">
               {t("session.form.group")}
             </FieldLabel>
-            <Input
-              id="session-group"
-              value={draft.group}
-              placeholder={t("session.form.groupPlaceholder")}
-              list="session-group-options"
-              onChange={(e) => patch({ group: e.target.value })}
-            />
-            <datalist id="session-group-options">
-              {existingGroups.map((path) => (
-                <option key={path} value={path} />
-              ))}
-            </datalist>
+            {/* Editable combobox: free text like the old datalist input, but
+                the suggestion popup is themed and filters as you type. */}
+            <Combobox
+              inputValue={draft.group}
+              onInputValueChange={(value) => patch({ group: value })}
+              autoHighlight
+            >
+              <ComboboxInput
+                id="session-group"
+                showTrigger={false}
+                className="w-full"
+                placeholder={t("session.form.groupPlaceholder")}
+              />
+              <ComboboxContent>
+                <ComboboxList>
+                  {existingGroups.map((path) => (
+                    <ComboboxItem key={path} value={path} className="text-xs">
+                      {path}
+                    </ComboboxItem>
+                  ))}
+                </ComboboxList>
+                <ComboboxEmpty className="text-xs">
+                  {t("session.form.groupEmpty")}
+                </ComboboxEmpty>
+              </ComboboxContent>
+            </Combobox>
           </Field>
 
           <Field className="gap-1.5">
@@ -512,7 +531,7 @@ export function SessionForm({
                   })
                 }
               />
-              <FieldDescription className="text-[11px]">
+              <FieldDescription className="text-xs">
                 {t("session.form.keepAliveHint")}
               </FieldDescription>
             </Field>
@@ -542,7 +561,7 @@ export function SessionForm({
                     {t("session.form.txMode.manual")}
                   </ToggleGroupItem>
                 </ToggleGroup>
-                <FieldDescription className="text-[11px]">
+                <FieldDescription className="text-xs">
                   {t("session.form.txModeHint")}
                 </FieldDescription>
               </Field>
@@ -567,26 +586,29 @@ export function SessionForm({
                     )}
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="" className="text-xs">
-                      {t("session.form.isolation.default")}
-                    </SelectItem>
-                    {(Object.keys(isolationLabels) as Array<keyof typeof isolationLabels>).map(
-                      (level) => (
-                        <SelectItem key={level} value={level} className="text-xs">
-                          {isolationLabels[level]}
-                        </SelectItem>
-                      ),
-                    )}
+                    <SelectGroup>
+                      <SelectItem value="" className="text-xs">
+                        {t("session.form.isolation.default")}
+                      </SelectItem>
+                      {(Object.keys(isolationLabels) as Array<keyof typeof isolationLabels>).map(
+                        (level) => (
+                          <SelectItem key={level} value={level} className="text-xs">
+                            {isolationLabels[level]}
+                          </SelectItem>
+                        ),
+                      )}
+
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
-                <FieldDescription className="text-[11px]">
+                <FieldDescription className="text-xs">
                   {t("session.form.isolationHint")}
                 </FieldDescription>
               </Field>
             </div>
           </>
         ) : (
-          <p className="text-[11px] text-muted-foreground/70">{t("session.form.keepAliveSqliteHint")}</p>
+          <p className="text-xs text-muted-foreground/70">{t("session.form.keepAliveSqliteHint")}</p>
         )}
       </FieldGroup>
 

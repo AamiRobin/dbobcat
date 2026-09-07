@@ -495,7 +495,7 @@ export function SessionManagerDialog({
           {/* Grouped session tree */}
           <div className="flex min-h-0 flex-col border-r">
             <div className="flex items-center justify-between px-2 py-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("session.list")}</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("session.list")}</span>
               <span className="flex items-center gap-0.5">
                 <Tooltip>
                   <TooltipTrigger asChild>

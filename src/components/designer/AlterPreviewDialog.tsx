@@ -84,7 +84,7 @@ export function AlterPreviewDialog({
             <TriangleAlert className="size-3" />
             <AlertTitle className="sr-only">Warnings</AlertTitle>
             <AlertDescription>
-              <ul className="flex flex-col gap-1 text-[11px] leading-snug">
+              <ul className="flex flex-col gap-1 text-xs leading-snug">
                 {result.warnings.map((w, i) => (
                   <li key={i}>{w}</li>
                 ))}
@@ -95,7 +95,7 @@ export function AlterPreviewDialog({
         {statements.length === 0 ? (
           <p className="text-xs text-muted-foreground">No differences detected.</p>
         ) : (
-          <pre className="max-h-72 overflow-auto rounded-md border bg-muted/30 p-2.5 font-mono text-[11px] leading-relaxed">
+          <pre className="max-h-72 overflow-auto rounded-md border bg-muted/30 p-2.5 font-mono text-xs leading-relaxed">
             {statements.map((s, i) => (
               <div key={i}>
                 {s};

@@ -6,13 +6,7 @@ import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EmptyPlaceholder } from "@/components/layout/EmptyPlaceholder";
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fetchProcesses, killProcess, serverKeys } from "@/lib/server-queries";
 import { cn } from "@/lib/utils";
@@ -90,22 +84,25 @@ function ProcessListInner({ connId }: { connId: number }) {
       {/* ---- toolbar ---- */}
       <div className="flex items-center gap-2 border-b px-2 py-1.5">
         <span className="text-xs font-semibold">Process list</span>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           {rows.length} process{rows.length === 1 ? "" : "es"}
           {ownCount > 0 && ` · ${ownCount} this connection`}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground">Auto-refresh</span>
+          <span className="text-xs text-muted-foreground">Auto-refresh</span>
           <Select value={intervalKey} onValueChange={(v) => setIntervalKey(v as Interval)}>
             <SelectTrigger size="sm" className="w-16 text-xs" aria-label="Refresh interval">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(Object.keys(INTERVAL_LABELS) as Interval[]).map((key) => (
-                <SelectItem key={key} value={key}>
-                  {INTERVAL_LABELS[key]}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {(Object.keys(INTERVAL_LABELS) as Interval[]).map((key) => (
+                  <SelectItem key={key} value={key}>
+                    {INTERVAL_LABELS[key]}
+                  </SelectItem>
+                ))}
+
+              </SelectGroup>
             </SelectContent>
           </Select>
           <Button
@@ -199,7 +196,7 @@ function ProcessRow({ p, onKill }: { p: ProcessInfo; onKill: (queryOnly: boolean
       <TableCell className="max-w-36 truncate" title={p.waitEvent ?? p.state ?? undefined}>
         {p.waitEventType || p.waitEvent || p.state || "—"}
       </TableCell>
-      <TableCell className="max-w-72 truncate font-mono text-[11px]" title={p.info ?? undefined}>
+      <TableCell className="max-w-72 truncate font-mono text-xs" title={p.info ?? undefined}>
         {info}
       </TableCell>
       <TableCell className="text-right">

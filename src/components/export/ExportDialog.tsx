@@ -393,7 +393,7 @@ function ExportDialogInner({
                     "flex flex-col items-center gap-1 rounded-md border px-1 py-2 text-[10px] transition-colors",
                     format === value
                       ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:bg-accent/60",
+                      : "border-border text-muted-foreground hover:bg-accent",
                   )}
                 >
                   <Icon className="size-4" />
@@ -541,10 +541,10 @@ function ExportDialogInner({
                   <FolderOpen data-icon="inline-start" />
                   Browse…
                 </Button>
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
                   {path ?? "no file chosen"}
                 </span>
-                <label className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+                <label className="ml-auto flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                   <Checkbox
                     checked={gzip}
                     onCheckedChange={(v) => setGzip(v === true)}
@@ -557,7 +557,7 @@ function ExportDialogInner({
             <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
               <RadioGroupItem value="clipboard" />
               Clipboard
-              <span className="pl-2 text-[11px] text-muted-foreground">
+              <span className="pl-2 text-xs text-muted-foreground">
                 up to 50 MB
               </span>
             </label>
@@ -589,7 +589,7 @@ function ExportDialogInner({
             </div>
           </RadioGroup>
           {serverNeedsSql && (
-            <p className="flex items-center gap-1 text-[11px] text-warning">
+            <p className="flex items-center gap-1 text-xs text-warning">
               <AlertTriangle className="size-3" />
               Server-to-server export runs SQL INSERT statements — pick the
               “SQL INSERTs” format.
@@ -606,7 +606,7 @@ function ExportDialogInner({
                 {busyLabel}
                 {progress?.table ? ` — ${progress.table}` : ""}
               </span>
-              <span className="font-mono text-[11px] text-muted-foreground">
+              <span className="font-mono text-xs text-muted-foreground">
                 {progress
                   ? `${progress.rowsDone.toLocaleString()} rows · ${formatBytes(progress.bytes)}`
                   : "…"}

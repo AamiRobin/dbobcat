@@ -19,11 +19,10 @@ import {
 import { SessionManagerDialog } from "@/components/session-manager/SessionManagerDialog";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  ButtonGroup,
+  ButtonGroupSeparator,
+} from "@/components/ui/button-group";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { t } from "@/lib/i18n";
@@ -32,6 +31,7 @@ import { openImportWizard } from "@/stores/import-dialog";
 import { openFindTextDialog } from "@/stores/find-dialog";
 import { useConnectionStore } from "@/stores/connection";
 import { useUiStore } from "@/stores/ui";
+import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import { openServerToolTab, openTab, type TabType } from "@/stores/tabs";
 
@@ -43,14 +43,14 @@ function NewTabMenu() {
   ];
 
   return (
-    <div className="flex items-center">
+    <ButtonGroup className="flex items-center">
       <Button
         variant="ghost"
         size="sm"
         className="gap-1.5 rounded-r-none"
         onClick={() => openTab("query")}
       >
-        <Plus />
+        <Plus data-icon="inline-start" />
         <span>{t("toolbar.newQuery")}</span>
       </Button>
       <DropdownMenu>
@@ -64,16 +64,19 @@ function NewTabMenu() {
             <ChevronDown />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-44">
-          {items.map(({ type, label, icon: Icon }) => (
-            <DropdownMenuItem key={type} onClick={() => openTab(type)}>
-              <Icon data-icon="inline-start" />
-              {label}
-            </DropdownMenuItem>
-          ))}
+        <DropdownMenuContent>
+          <DropdownMenuGroup>
+            {items.map(({ type, label, icon: Icon }) => (
+              <DropdownMenuItem key={type} onClick={() => openTab(type)}>
+                <Icon data-icon="inline-start" />
+                {label}
+              </DropdownMenuItem>
+            ))}
+
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </ButtonGroup>
   );
 }
 
@@ -113,7 +116,7 @@ export function Toolbar() {
       // brand cluster — buttons/links opt out automatically.
       data-tauri-drag-region="deep"
       className={cn(
-        "flex h-11 shrink-0 items-center gap-2 border-b bg-muted/30 px-2",
+        "flex h-11 shrink-0 items-center gap-2 border-b bg-muted/40 px-2",
         trafficLightInset,
       )}
     >
@@ -128,10 +131,7 @@ export function Toolbar() {
       <Separator orientation="vertical" className="h-5" />
 
       {/* Primary actions — connected, refresh, import, new tab */}
-      <div
-        data-slot="button-group"
-        className="flex h-7 items-center rounded-md border bg-background p-0.5 shadow-xs"
-      >
+      <ButtonGroup className="h-7 items-center rounded-md border bg-background p-0.5 shadow-xs">
         <Button
           variant="ghost"
           size="sm"
@@ -139,15 +139,15 @@ export function Toolbar() {
           aria-label={t("toolbar.connect")}
           className="gap-1.5"
         >
-          <Cable />
+          <Cable data-icon="inline-start" />
           {t("toolbar.connect")}
         </Button>
 
-        <Separator orientation="vertical" className="h-4" />
+        <ButtonGroupSeparator className="h-4 bg-border" />
 
         <NewTabMenu />
 
-        <Separator orientation="vertical" className="h-4" />
+        <ButtonGroupSeparator className="h-4 bg-border" />
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -158,12 +158,12 @@ export function Toolbar() {
               onClick={() => void dispatchAction("tree.refresh")}
               className="gap-1.5"
             >
-              <RefreshCw />
+              <RefreshCw data-icon="inline-start" />
               {t("toolbar.refresh")}
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {t("toolbar.refresh")} ({formatCombo("Ctrl+R")})
+            {t("toolbar.refresh")} (<Kbd>{formatCombo("Ctrl+R")}</Kbd>)
           </TooltipContent>
         </Tooltip>
 
@@ -176,22 +176,19 @@ export function Toolbar() {
               onClick={() => connId !== null && openImportWizard({ connId })}
               className="gap-1.5"
             >
-              <FileUp />
+              <FileUp data-icon="inline-start" />
               {t("toolbar.import")}
             </Button>
           </TooltipTrigger>
           <TooltipContent>{t("toolbar.importHint")}</TooltipContent>
         </Tooltip>
-      </div>
+      </ButtonGroup>
 
       {/* Server tools — only on MySQL / PostgreSQL */}
       {serverToolsReady && (
         <>
           <Separator orientation="vertical" className="h-5" />
-          <div
-            data-slot="button-group"
-            className="flex h-7 items-center rounded-md border bg-background p-0.5 shadow-xs"
-          >
+          <ButtonGroup className="h-7 items-center rounded-md border bg-background p-0.5 shadow-xs">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -251,16 +248,13 @@ export function Toolbar() {
               </TooltipTrigger>
               <TooltipContent>{t("toolbar.findTextHint")}</TooltipContent>
             </Tooltip>
-          </div>
+          </ButtonGroup>
         </>
       )}
 
       {/* Trailing utility cluster */}
       <div className="ml-auto flex items-center">
-        <div
-          data-slot="button-group"
-          className="flex h-7 items-center rounded-md border bg-background p-0.5 shadow-xs"
-        >
+        <ButtonGroup className="h-7 items-center rounded-md border bg-background p-0.5 shadow-xs">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -273,7 +267,7 @@ export function Toolbar() {
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              {t("toolbar.palette")} ({formatCombo("Mod+K")})
+              {t("toolbar.palette")} (<Kbd>{formatCombo("Mod+K")}</Kbd>)
             </TooltipContent>
           </Tooltip>
 
@@ -290,7 +284,7 @@ export function Toolbar() {
             </TooltipTrigger>
             <TooltipContent>{t("toolbar.toggleTheme")}</TooltipContent>
           </Tooltip>
-        </div>
+        </ButtonGroup>
       </div>
 
       <SessionManagerDialog

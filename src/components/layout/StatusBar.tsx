@@ -31,7 +31,7 @@ export function StatusBar() {
   const pending = status === "connecting" || status === "error";
 
   return (
-    <footer className="flex h-6 shrink-0 items-center gap-2 border-t bg-background px-2 text-[11px] text-muted-foreground">
+    <footer className="flex h-6 shrink-0 items-center gap-2 border-t bg-background px-2 text-xs text-muted-foreground">
       <span className="flex items-center gap-1.5 font-medium">
         <Circle
           className={cn(

@@ -303,7 +303,7 @@ export function QueryResultGrid({
       <div
         className={cn(
           "flex h-6 shrink-0 items-center gap-2 border-t bg-muted/40 px-2",
-          "text-[11px] text-muted-foreground tabular-nums",
+          "text-xs text-muted-foreground tabular-nums",
         )}
       >
         <span>{result.rows.length.toLocaleString()} rows</span>
@@ -323,7 +323,7 @@ export function QueryResultGrid({
             <Button
               variant="ghost"
               size="xs"
-              className="h-5 px-1.5 text-[11px]"
+              className="h-5 px-1.5 text-xs"
               disabled={pending === 0 || post.isPending}
               onClick={() => {
                 useChangesetStore.getState().clear(changesetKey);
@@ -334,7 +334,7 @@ export function QueryResultGrid({
             </Button>
             <Button
               size="xs"
-              className="h-5 px-1.5 text-[11px]"
+              className="h-5 px-1.5 text-xs"
               disabled={pending === 0 || post.isPending}
               onClick={() => post.mutate()}
             >

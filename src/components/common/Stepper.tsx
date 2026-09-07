@@ -17,7 +17,7 @@ export function Stepper({
   className?: string;
 }) {
   return (
-    <ol className={cn("flex items-center gap-1 text-[11px]", className)}>
+    <ol className={cn("flex items-center gap-1 text-xs", className)}>
       {steps.map((label, i) => {
         const done = i < active;
         const current = i === active;

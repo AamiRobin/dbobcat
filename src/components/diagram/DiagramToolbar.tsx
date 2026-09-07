@@ -10,12 +10,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -73,7 +68,7 @@ export function DiagramToolbar(props: DiagramToolbarProps) {
         <Shrink />
       </ToolButton>
 
-      <span className="min-w-9 text-center text-[11px] tabular-nums text-muted-foreground">
+      <span className="min-w-9 text-center text-xs tabular-nums text-muted-foreground">
         {Math.round(props.zoom * 100)}%
       </span>
 
@@ -125,19 +120,22 @@ export function DiagramToolbar(props: DiagramToolbarProps) {
             </TooltipTrigger>
             <TooltipContent>{t("er.toolbar.export")}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={props.onExportPng}>
-              <Image data-icon="inline-start" />
-              {t("er.toolbar.exportPng")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={props.onExportSvg}>
-              <Download data-icon="inline-start" />
-              {t("er.toolbar.exportSvg")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={props.onCopyImage}>
-              <Copy data-icon="inline-start" />
-              {t("er.toolbar.copyImage")}
-            </DropdownMenuItem>
+          <DropdownMenuContent>
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={props.onExportPng}>
+                <Image data-icon="inline-start" />
+                {t("er.toolbar.exportPng")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={props.onExportSvg}>
+                <Download data-icon="inline-start" />
+                {t("er.toolbar.exportSvg")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={props.onCopyImage}>
+                <Copy data-icon="inline-start" />
+                {t("er.toolbar.copyImage")}
+              </DropdownMenuItem>
+
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
 

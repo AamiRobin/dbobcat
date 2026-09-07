@@ -144,7 +144,7 @@ export function DistinctValuesDialog({
                   <label
                     key={key}
                     className={cn(
-                      "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 hover:bg-accent/60",
+                      "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 hover:bg-accent",
                       selected.has(key) && "bg-accent/40",
                     )}
                   >
@@ -155,7 +155,7 @@ export function DistinctValuesDialog({
                     <span className="min-w-0 flex-1 truncate font-mono text-xs">
                       {cellDisplayText(row.value)}
                     </span>
-                    <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                    <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
                       {row.count.toLocaleString()}
                     </span>
                   </label>

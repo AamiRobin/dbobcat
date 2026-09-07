@@ -197,7 +197,7 @@ function ObjectEditorInner({
         </Badge>
         <span className="font-mono text-xs font-medium">{createMode ? `new_${kind}` : name}</span>
         <span className="text-xs text-muted-foreground">in</span>
-        <Badge variant="outline" className="font-mono text-[11px]">{db}</Badge>
+        <Badge variant="outline" className="font-mono text-xs">{db}</Badge>
 
         <div className="ml-auto flex items-center gap-1">
           <Tooltip>

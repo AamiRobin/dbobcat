@@ -228,7 +228,7 @@ function DesignerInner({
           className="h-6 w-44 px-2 font-mono text-xs"
         />
         <span className="text-xs text-muted-foreground">in</span>
-        <Badge variant="outline" className="font-mono text-[11px]">
+        <Badge variant="outline" className="font-mono text-xs">
           {db}
         </Badge>
 
@@ -287,7 +287,7 @@ function DesignerInner({
       </div>
 
       {dialect === "sqlite" && (
-        <div className="shrink-0 border-b bg-warning/10 px-3 py-1.5 text-[11px] leading-snug text-warning">
+        <div className="shrink-0 border-b bg-warning/10 px-3 py-1.5 text-xs leading-snug text-warning">
           Limited ALTER support on SQLite: only adding columns, renaming and
           dropping columns/indexes apply directly. Other changes require
           recreating the table (not generated here).
@@ -315,7 +315,7 @@ function DesignerInner({
             </TabsTrigger>
           </TabsList>
           {!createMode && dirty && (
-            <span className="ml-auto pr-2 text-[11px] text-warning">
+            <span className="ml-auto pr-2 text-xs text-warning">
               unsaved changes
             </span>
           )}

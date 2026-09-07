@@ -1,6 +1,7 @@
 import { Keyboard } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import {
   Dialog,
   DialogContent,
@@ -59,7 +60,7 @@ export function ShortcutsDialog() {
         <div className="grid grid-cols-2 gap-x-6 gap-y-4 overflow-y-auto pr-1">
           {groups.map(({ group, items }) => (
             <section key={group} className="min-w-0">
-              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 {group}
               </h3>
               <ul className="flex flex-col gap-1.5">
@@ -67,11 +68,7 @@ export function ShortcutsDialog() {
                   <li key={item.id} className="flex items-baseline justify-between gap-3 text-xs">
                     <span className="min-w-0 truncate text-foreground/90">{item.label}</span>
                     <span className="flex shrink-0 gap-1">
-                      <kbd
-                        className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground"
-                      >
-                        {formatCombo(item.combos[0])}
-                      </kbd>
+                      <Kbd>{formatCombo(item.combos[0])}</Kbd>
                     </span>
                   </li>
                 ))}
@@ -80,47 +77,41 @@ export function ShortcutsDialog() {
           ))}
 
           <section>
-            <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Editor
             </h3>
             <ul className="flex flex-col gap-1.5">
               {EDITOR_KEYS.map(({ combo, label }) => (
                 <li key={combo} className="flex items-baseline justify-between gap-3 text-xs">
                   <span className="min-w-0 truncate text-foreground/90">{label}</span>
-                  <kbd className="shrink-0 rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
-                    {combo}
-                  </kbd>
+                  <Kbd className="shrink-0">{combo}</Kbd>
                 </li>
               ))}
             </ul>
           </section>
 
           <section>
-            <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Grid
             </h3>
             <ul className="flex flex-col gap-1.5">
               {GRID_KEYS.map(({ combo, label }) => (
                 <li key={combo} className="flex items-baseline justify-between gap-3 text-xs">
                   <span className="min-w-0 truncate text-foreground/90">{label}</span>
-                  <kbd className="shrink-0 rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
-                    {combo}
-                  </kbd>
+                  <Kbd className="shrink-0">{combo}</Kbd>
                 </li>
               ))}
             </ul>
           </section>
 
           <section>
-            <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Dialogs
             </h3>
             <ul className="flex flex-col gap-1.5 text-xs">
               <li className="flex items-baseline justify-between gap-3">
                 <span className="text-foreground/90">Close dialog</span>
-                <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
-                  Esc
-                </kbd>
+                <Kbd>Esc</Kbd>
               </li>
             </ul>
           </section>

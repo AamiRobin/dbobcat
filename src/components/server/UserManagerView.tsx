@@ -24,13 +24,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { dbKeys, fetchDatabases, fetchTables, TREE_STALE_TIME } from "@/lib/db-queries";
@@ -128,7 +122,7 @@ function UserManagerInner({ connId }: { connId: number }) {
                 "flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs",
                 selected && userLabel(selected) === userLabel(u)
                   ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent/50",
+                  : "hover:bg-accent",
               )}
             >
               <span className="truncate font-mono">{userLabel(u)}</span>
@@ -325,7 +319,7 @@ function PrivilegesTab({
             {rawStatements.map((stmt, i) => (
               <li
                 key={i}
-                className="rounded-md border bg-background p-1.5 font-mono text-[11px] leading-snug break-all whitespace-pre-wrap"
+                className="rounded-md border bg-background p-1.5 font-mono text-xs leading-snug break-all whitespace-pre-wrap"
               >
                 {stmt}
               </li>
@@ -457,14 +451,17 @@ function AddPrivilegeDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__global__">
-                    {dialect === "mysql" ? "Global (*.* )" : "No database"}
-                  </SelectItem>
-                  {(databases.data ?? []).map((d) => (
-                    <SelectItem key={d.name} value={d.name}>
-                      {d.name}
+                  <SelectGroup>
+                    <SelectItem value="__global__">
+                      {dialect === "mysql" ? "Global (*.* )" : "No database"}
                     </SelectItem>
-                  ))}
+                    {(databases.data ?? []).map((d) => (
+                      <SelectItem key={d.name} value={d.name}>
+                        {d.name}
+                      </SelectItem>
+                    ))}
+
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </Field>
@@ -475,14 +472,17 @@ function AddPrivilegeDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">Whole database</SelectItem>
-                  {(tables.data ?? [])
-                    .filter((t) => t.kind === "table")
-                    .map((t) => (
-                      <SelectItem key={t.name} value={t.name}>
-                        {t.name}
-                      </SelectItem>
-                    ))}
+                  <SelectGroup>
+                    <SelectItem value="__none__">Whole database</SelectItem>
+                    {(tables.data ?? [])
+                      .filter((t) => t.kind === "table")
+                      .map((t) => (
+                        <SelectItem key={t.name} value={t.name}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </Field>
@@ -593,7 +593,7 @@ function SettingsTab({
           className={cn(mismatch && "border-destructive")}
           autoComplete="new-password"
         />
-        {mismatch && <p className="text-[11px] text-destructive">Passwords do not match.</p>}
+        {mismatch && <p className="text-xs text-destructive">Passwords do not match.</p>}
       </section>
 
       {isMysql && (
@@ -605,15 +605,18 @@ function SettingsTab({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {AUTH_PLUGINS_MYSQL.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
-                  </SelectItem>
-                ))}
-                {user.authPlugin &&
-                  !(AUTH_PLUGINS_MYSQL as readonly string[]).includes(user.authPlugin) && (
-                    <SelectItem value={user.authPlugin}>{user.authPlugin}</SelectItem>
-                  )}
+                <SelectGroup>
+                  {AUTH_PLUGINS_MYSQL.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                  {user.authPlugin &&
+                    !(AUTH_PLUGINS_MYSQL as readonly string[]).includes(user.authPlugin) && (
+                      <SelectItem value={user.authPlugin}>{user.authPlugin}</SelectItem>
+                    )}
+
+                </SelectGroup>
               </SelectContent>
             </Select>
           </section>
@@ -838,11 +841,14 @@ function CreateUserDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {AUTH_PLUGINS_MYSQL.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {AUTH_PLUGINS_MYSQL.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+
+                </SelectGroup>
               </SelectContent>
             </Select>
           </Field>

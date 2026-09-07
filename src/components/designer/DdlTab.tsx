@@ -42,7 +42,7 @@ export function DdlTab({
       </div>
       <pre
         className={cn(
-          "min-h-0 flex-1 overflow-auto p-3 font-mono text-[11px] leading-relaxed",
+          "min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed",
           theme === "dark" ? "text-foreground/90" : "text-foreground",
         )}
       >

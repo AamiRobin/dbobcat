@@ -13,13 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -181,15 +175,18 @@ function CopyTableDialogInner({
                 <SelectValue placeholder={databases.isPending ? "…" : undefined} />
               </SelectTrigger>
               <SelectContent>
-                {(databases.data ?? []).map((d) => (
-                  <SelectItem key={d.name} value={d.name} className="text-xs">
-                    {d.name}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {(databases.data ?? []).map((d) => (
+                    <SelectItem key={d.name} value={d.name} className="text-xs">
+                      {d.name}
+                    </SelectItem>
+                  ))}
+
+                </SelectGroup>
               </SelectContent>
             </Select>
             {!crossDbAllowed && (
-              <p className="text-[11px] text-muted-foreground/70">{t("tree.copyTable.sameOnly")}</p>
+              <p className="text-xs text-muted-foreground/70">{t("tree.copyTable.sameOnly")}</p>
             )}
           </Field>
 
@@ -210,7 +207,7 @@ function CopyTableDialogInner({
               aria-invalid={nameTaken}
             />
             {nameTaken && (
-              <p className="text-[11px] text-destructive">{t("tree.copyTable.exists")}</p>
+              <p className="text-xs text-destructive">{t("tree.copyTable.exists")}</p>
             )}
           </Field>
 
@@ -244,8 +241,8 @@ function CopyTableDialogInner({
             <Switch checked={copyFks} onCheckedChange={setCopyFks} aria-label={t("tree.copyTable.fks")} />
           </label>
 
-          {error && <p className="break-all text-[11px] leading-snug text-destructive">{error}</p>}
-          <p className="text-[11px] text-muted-foreground/70">{t("tree.copyTable.hint")}</p>
+          {error && <p className="break-all text-xs leading-snug text-destructive">{error}</p>}
+          <p className="text-xs text-muted-foreground/70">{t("tree.copyTable.hint")}</p>
         </div>
 
         <AlertDialogFooter>

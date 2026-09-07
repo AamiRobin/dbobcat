@@ -27,13 +27,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { readClipboardText } from "@/lib/db-queries";
@@ -481,9 +477,9 @@ export function DataGrid(props: DataGridProps) {
 
         {/* ---- overlays ---- */}
         {showSkeleton && (
-          <div
+          <Skeleton
             aria-hidden
-            className="absolute inset-x-0 top-0 animate-pulse rounded-b-md bg-muted/50"
+            className="absolute inset-x-0 top-0 rounded-b-md"
             style={{ height: HEADER_HEIGHT + FILTER_HEIGHT + 96 }}
           />
         )}
@@ -688,8 +684,8 @@ function FilterCell({
           size="sm"
           className={cn(
             "h-5! w-auto shrink-0 gap-0.5 border border-transparent px-1! text-[10px] shadow-none",
-            "bg-transparent dark:bg-transparent",
-            "transition-colors hover:border-input/60 hover:bg-accent/50 dark:hover:bg-accent/50",
+            "bg-transparent",
+            "transition-colors hover:border-input/60 hover:bg-accent/50",
             engaged
               ? "text-foreground"
               : "text-muted-foreground/70 group-hover/fc:text-muted-foreground",
@@ -699,11 +695,14 @@ function FilterCell({
           {inFilter ? "IN" : FILTER_OPS.find((o) => o.value === op)?.label}
         </SelectTrigger>
         <SelectContent>
-          {FILTER_OPS.map((o) => (
-            <SelectItem key={o.value} value={o.value} className="text-xs">
-              {o.label}
-            </SelectItem>
-          ))}
+          <SelectGroup>
+            {FILTER_OPS.map((o) => (
+              <SelectItem key={o.value} value={o.value} className="text-xs">
+                {o.label}
+              </SelectItem>
+            ))}
+
+          </SelectGroup>
         </SelectContent>
       </Select>
       <input
@@ -722,7 +721,7 @@ function FilterCell({
         className={cn(
           "h-5 w-full min-w-0 rounded-sm border border-transparent bg-transparent px-1 text-[11px] outline-none transition-colors",
           "placeholder:text-muted-foreground/50",
-          "hover:border-input/60 hover:bg-accent/30 dark:hover:bg-accent/30",
+          "hover:border-input/60 hover:bg-accent/30",
           "focus-visible:border-ring focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring/40 dark:focus-visible:bg-input/30",
           engaged && "border-input/70 bg-accent/25 dark:bg-input/30",
         )}
