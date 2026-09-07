@@ -517,8 +517,10 @@ export function SessionForm({
               </FieldDescription>
             </Field>
 
-            {/* Transactions Phase 1: per-connection tx defaults */}
-            <div className="grid grid-cols-[140px_1fr] items-end gap-3">
+            {/* Transactions Phase 1: per-connection tx defaults.
+                items-start keeps both labels/controls on the same rows even
+                though the left hint wraps taller than the right one. */}
+            <div className="grid grid-cols-[200px_1fr] items-start gap-3">
               <Field className="gap-1.5">
                 <FieldLabel className="text-xs text-muted-foreground">
                   {t("session.form.txMode")}
@@ -553,7 +555,11 @@ export function SessionForm({
                   value={draft.isolationDefault}
                   onValueChange={(v) => patch({ isolationDefault: v as SessionDraft["isolationDefault"] })}
                 >
-                  <SelectTrigger id="session-isolation" className="w-full text-xs">
+                  <SelectTrigger
+                    id="session-isolation"
+                    size="sm"
+                    className="w-full text-xs"
+                  >
                     {draft.isolationDefault === "" ? (
                       t("session.form.isolation.default")
                     ) : (
