@@ -32,6 +32,7 @@ import { openImportWizard } from "@/stores/import-dialog";
 import { openFindTextDialog } from "@/stores/find-dialog";
 import { useConnectionStore } from "@/stores/connection";
 import { useUiStore } from "@/stores/ui";
+import { cn } from "@/lib/utils";
 import { openServerToolTab, openTab, type TabType } from "@/stores/tabs";
 
 function NewTabMenu() {
@@ -102,8 +103,20 @@ export function Toolbar() {
   // Server tools exist on MySQL/PostgreSQL only (P7 scope: SQLite skipped).
   const serverToolsReady = status === "connected" && connId !== null && dialect !== "sqlite";
 
+  // macOS draws the traffic lights over the header (titleBarStyle: Overlay);
+  // other platforms keep the native title bar, so no extra inset is needed.
+  const trafficLightInset = /Mac/i.test(navigator.userAgent) ? "pl-[78px]" : "";
+
   return (
-    <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-muted/30 px-2">
+    <header
+      // "deep": any non-clickable header area drags the window, including the
+      // brand cluster — buttons/links opt out automatically.
+      data-tauri-drag-region="deep"
+      className={cn(
+        "flex h-11 shrink-0 items-center gap-2 border-b bg-muted/30 px-2",
+        trafficLightInset,
+      )}
+    >
       {/* Brand */}
       <div className="flex items-center gap-2 pr-1">
         <div className="flex size-6 items-center justify-center rounded-md bg-foreground/[0.06] text-foreground">
