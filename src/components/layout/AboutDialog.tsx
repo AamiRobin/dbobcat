@@ -1,4 +1,4 @@
-import { Cable } from "lucide-react";
+import logoUrl from "@/assets/dbobcat-logo.png";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -25,9 +25,7 @@ export function AboutDialog() {
       <DialogContent className="max-w-sm sm:max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <span className="flex size-6 items-center justify-center rounded bg-primary text-primary-foreground">
-              <Cable className="size-4" />
-            </span>
+            <img src={logoUrl} alt="" className="size-6 rounded-md" />
             {t("about.title")}
           </DialogTitle>
           <DialogDescription>{t("about.tagline")}</DialogDescription>

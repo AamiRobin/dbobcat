@@ -82,20 +82,6 @@ function NewTabMenu() {
   );
 }
 
-function DBobcatGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" className="size-3.5" fill="currentColor" aria-hidden>
-      {/* den mound */}
-      <rect x="3" y="17.5" width="18" height="4.5" rx="2.25" />
-      {/* body + head + tufted ears */}
-      <path d="M8.6 6.6 8 1.6l2.4 3Z" />
-      <path d="M15.4 6.6 16 1.6l-2.4 3Z" />
-      <circle cx="12" cy="8" r="3.9" />
-      <path d="M12 7c-3 0-5 2-6.2 4.8-.9 2.1-1.1 3.9-1.1 5.7h14.6c0-1.8-.2-3.6-1.1-5.7C17 9 15 7 12 7Z" />
-    </svg>
-  );
-}
-
 export function Toolbar() {
   const theme = useUiStore((s) => s.theme);
   const sessionManagerOpen = useUiStore((s) => s.sessionManagerOpen);
@@ -124,10 +110,7 @@ export function Toolbar() {
       )}
     >
       {/* Brand */}
-      <div className="flex items-center gap-2 pr-1">
-        <div className="flex size-6 items-center justify-center rounded-md bg-foreground/[0.06] text-foreground">
-          <DBobcatGlyph />
-        </div>
+      <div className="flex items-center pr-1">
         <span className="text-[13px] font-semibold tracking-tight">DBobcat</span>
       </div>
 
