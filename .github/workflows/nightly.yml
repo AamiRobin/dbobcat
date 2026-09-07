@@ -1,0 +1,68 @@
+# Nightly cross-platform build.
+#
+# Produces installers for macOS (dmg), Windows (nsis) and Linux (deb,
+# appimage) from main and attaches them to the `nightly` prerelease.
+# The nightly version override (src-tauri/tauri.nightly.conf.json) keeps
+# these builds on 0.1.0-nightly so they never shadow a real release and
+# produce stable asset names that get replaced on every run.
+#
+# The auto-updater stays out of nightlies: updater artifacts are only
+# created when tauri.updater.conf.json is merged, which the nightly
+# config does not do.
+
+name: nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 02:30 UTC every day.
+    - cron: "30 2 * * *"
+
+jobs:
+  nightly:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --bundles app,dmg
+          - platform: ubuntu-22.04
+            args: --bundles deb,appimage
+          - platform: windows-latest
+            args: --bundles nsis
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bun (frontend build tooling)
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Rust build cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Build and attach to the nightly release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tagName: nightly
+          releaseName: "Nightly build"
+          releaseBody:
+            "Automated nightly build from main. Untested — expect rough
+            edges. macOS builds are unsigned: right-click the app and pick
+            Open, or run xattr -cr on it, on first launch."
+          releaseDraft: false
+          prerelease: true
+          args: ${{ matrix.args }} --config src-tauri/tauri.nightly.conf.json

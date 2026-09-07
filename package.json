@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "test": "bun test",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:nightly": "tauri build --config src-tauri/tauri.nightly.conf.json"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
