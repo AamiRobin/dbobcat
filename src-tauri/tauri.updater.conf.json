@@ -7,7 +7,7 @@
     "updater": {
       "pubkey": "__TAURI_UPDATER_PUBLIC_KEY__",
       "endpoints": [
-        "https://github.com/AamiRobin/murmeli/releases/latest/download/latest.json"
+        "https://github.com/AamiRobin/dbobcat/releases/latest/download/latest.json"
       ]
     }
   }

@@ -1,8 +1,9 @@
 import { sql, MySQL, PostgreSQL, SQLite } from "@codemirror/lang-sql";
+import { syntaxHighlighting } from "@codemirror/language";
 import { search, openSearchPanel, searchKeymap } from "@codemirror/search";
 import { EditorView, keymap } from "@codemirror/view";
 import { Prec } from "@codemirror/state";
-import { oneDark } from "@codemirror/theme-one-dark";
+import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo } from "react";
 
@@ -23,67 +24,99 @@ import type { SqlDialect } from "@/types/ipc";
 export const MONO_STACK =
   "'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
 
-export const sqlChromeTheme = EditorView.theme({
-  "&": {
-    fontSize: "12.5px",
-    backgroundColor: "transparent",
-    color: "var(--foreground)",
-  },
-  "&.cm-focused": { outline: "none" },
-  ".cm-scroller": {
-    fontFamily: MONO_STACK,
-    lineHeight: "1.55",
-  },
-  ".cm-gutters": {
-    backgroundColor: "color-mix(in oklab, var(--muted) 40%, transparent)",
-    color: "var(--muted-foreground)",
-    border: "none",
-    borderRight: "1px solid var(--border)",
-  },
-  ".cm-activeLine": {
-    backgroundColor: "color-mix(in oklab, var(--accent) 35%, transparent)",
-  },
-  ".cm-activeLineGutter": {
-    backgroundColor: "color-mix(in oklab, var(--accent) 50%, transparent)",
-    color: "var(--foreground)",
-  },
-  ".cm-selectionBackground, ::selection": {
-    backgroundColor: "color-mix(in oklab, var(--primary) 22%, transparent)!",
-  },
-  ".cm-tooltip": {
-    border: "1px solid var(--border)",
-    backgroundColor: "var(--popover)",
-    color: "var(--popover-foreground)",
-  },
-  // Find & replace panel (Phase 9-B): hook the panel chrome into the shadcn
-  // CSS variables so light/dark follow the app theme next to oneDark.
-  ".cm-panel.cm-search": {
-    backgroundColor: "var(--popover)",
-    color: "var(--popover-foreground)",
-    borderTop: "1px solid var(--border)",
-    borderBottom: "1px solid var(--border)",
-    fontFamily: "var(--font-sans, inherit)",
-    fontSize: "11.5px",
-    padding: "4px 8px",
-  },
-  ".cm-panel.cm-search label": {
-    color: "var(--muted-foreground)",
-  },
-  ".cm-panel.cm-search input, .cm-panel.cm-search button": {
-    borderRadius: "calc(var(--radius) - 4px)",
-    border: "1px solid var(--border)",
-    background: "var(--background)",
-    color: "var(--foreground)",
-    padding: "1px 5px",
-    fontSize: "11.5px",
-  },
-  ".cm-panel.cm-search button:hover": {
-    background: "var(--accent)",
-  },
-  ".cm-panel.cm-search input[name=search]": {
-    color: "var(--popover-foreground)",
-  },
-});
+// One Dark's token colors only. The full `oneDark` preset also ships a
+// chrome theme with fixed #282c34 surfaces that clashes with the app's
+// neutral background, so only the syntax highlight style is kept — every
+// chrome color comes from the app's CSS variables via the theme below.
+export const oneDarkSyntax = syntaxHighlighting(oneDarkHighlightStyle);
+
+/** Editor chrome spec: every color resolves from the app's CSS variables,
+ * so a single spec serves both themes (the `.dark` vars just flip). */
+function chromeThemeSpec() {
+  return {
+    "&": {
+      fontSize: "12.5px",
+      backgroundColor: "transparent",
+      color: "var(--foreground)",
+    },
+    "&.cm-focused": { outline: "none" },
+    ".cm-scroller": {
+      fontFamily: MONO_STACK,
+      lineHeight: "1.55",
+    },
+    ".cm-content": {
+      caretColor: "var(--foreground)",
+    },
+    ".cm-cursor, .cm-dropCursor": {
+      borderLeftColor: "var(--foreground)",
+    },
+    ".cm-placeholder": {
+      color: "var(--muted-foreground)",
+    },
+    ".cm-gutters": {
+      backgroundColor: "color-mix(in oklab, var(--muted) 40%, transparent)",
+      color: "var(--muted-foreground)",
+      border: "none",
+      borderRight: "1px solid var(--border)",
+    },
+    ".cm-activeLine": {
+      backgroundColor: "color-mix(in oklab, var(--accent) 35%, transparent)",
+    },
+    ".cm-activeLineGutter": {
+      backgroundColor: "color-mix(in oklab, var(--accent) 50%, transparent)",
+      color: "var(--foreground)",
+    },
+    ".cm-selectionBackground, ::selection": {
+      backgroundColor: "color-mix(in oklab, var(--primary) 22%, transparent)!",
+    },
+    ".cm-panels": {
+      backgroundColor: "var(--popover)",
+      color: "var(--popover-foreground)",
+    },
+    ".cm-tooltip": {
+      border: "1px solid var(--border)",
+      backgroundColor: "var(--popover)",
+      color: "var(--popover-foreground)",
+    },
+    // Find & replace panel (Phase 9-B): hook the panel chrome into the
+    // shadcn CSS variables so light/dark follow the app theme.
+    ".cm-panel.cm-search": {
+      backgroundColor: "var(--popover)",
+      color: "var(--popover-foreground)",
+      borderTop: "1px solid var(--border)",
+      borderBottom: "1px solid var(--border)",
+      fontFamily: "var(--font-sans, inherit)",
+      fontSize: "11.5px",
+      padding: "4px 8px",
+    },
+    ".cm-panel.cm-search label": {
+      color: "var(--muted-foreground)",
+    },
+    ".cm-panel.cm-search input, .cm-panel.cm-search button": {
+      borderRadius: "calc(var(--radius) - 4px)",
+      border: "1px solid var(--border)",
+      background: "var(--background)",
+      color: "var(--foreground)",
+      padding: "1px 5px",
+      fontSize: "11.5px",
+    },
+    ".cm-panel.cm-search button:hover": {
+      background: "var(--accent)",
+    },
+    ".cm-panel.cm-search input[name=search]": {
+      color: "var(--popover-foreground)",
+    },
+  };
+}
+
+const sqlChromeLight = EditorView.theme(chromeThemeSpec(), { dark: false });
+const sqlChromeDark = EditorView.theme(chromeThemeSpec(), { dark: true });
+
+/** Theme-aware editor chrome; `dark` also flips CodeMirror's built-in base
+ * theme (caret/selection/search-match fallbacks) via its `darkTheme` facet. */
+export function sqlChromeTheme(dark: boolean) {
+  return dark ? sqlChromeDark : sqlChromeLight;
+}
 
 /** Map the wire dialect to the CodeMirror SQL dialect. */
 export function dialectToLang(dialect: SqlDialect | undefined) {
@@ -191,7 +224,7 @@ export function SqlCodeEditor({
       onChange={onChange}
       height="100%"
       style={{ height: "100%" }}
-      theme={theme === "dark" ? [oneDark, sqlChromeTheme] : sqlChromeTheme}
+      theme={theme === "dark" ? [oneDarkSyntax, sqlChromeTheme(true)] : sqlChromeTheme(false)}
       extensions={[language, ...searchExtensions]}
       editable={!readOnly}
       basicSetup={{

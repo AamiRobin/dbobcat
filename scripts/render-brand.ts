@@ -23,11 +23,12 @@ function alphaStats(pixels: Uint8Array): { opaque: number; translucent: number; 
 
 mkdirSync("assets/brand", { recursive: true });
 
-const full = render("assets/brand/murmeli-mark.svg", 1024);
-writeFileSync("assets/brand/murmeli-1024.png", new Resvg(readFileSync("assets/brand/murmeli-mark.svg", "utf8"), { fitTo: { mode: "width", value: 1024 } }).render().asPng());
-console.log(`murmeli-1024.png ${full.width}x${full.height} alpha=`, alphaStats(full.pixels));
+const full = render("assets/brand/dbobcat-mark.svg", 1024);
+writeFileSync("assets/brand/dbobcat-1024.png", new Resvg(readFileSync("assets/brand/dbobcat-mark.svg", "utf8"), { fitTo: { mode: "width", value: 1024 } }).render().asPng());
+console.log(`dbobcat-1024.png ${full.width}x${full.height} alpha=`, alphaStats(full.pixels));
 
-const tiny = render("assets/brand/murmeli-mark.svg", 16);
-const pngBytes = new Resvg(readFileSync("assets/brand/murmeli-mark.svg", "utf8"), { fitTo: { mode: "width", value: 16 } }).render().asPng();
-writeFileSync("/tmp/opencode/murmeli-16.png", pngBytes);
-console.log(`murmeli-16.png ${tiny.width}x${tiny.height} bytes=${pngBytes.length} alpha=`, alphaStats(tiny.pixels));
+const tiny = render("assets/brand/dbobcat-mark.svg", 16);
+const pngBytes = new Resvg(readFileSync("assets/brand/dbobcat-mark.svg", "utf8"), { fitTo: { mode: "width", value: 16 } }).render().asPng();
+mkdirSync("/tmp/opencode", { recursive: true });
+writeFileSync("/tmp/opencode/dbobcat-16.png", pngBytes);
+console.log(`dbobcat-16.png ${tiny.width}x${tiny.height} bytes=${pngBytes.length} alpha=`, alphaStats(tiny.pixels));

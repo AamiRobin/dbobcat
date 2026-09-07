@@ -584,28 +584,32 @@ export function SessionForm({
         )}
       </FieldGroup>
 
-      <div className="min-h-9 shrink-0 border-t px-4 py-2">
-        {testPending ? (
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Spinner className="size-3.5" />
-            {t("session.testing")}
-          </p>
-        ) : testResult ? (
-          testResult.ok ? (
-            <p className="flex items-center gap-2 text-xs text-success">
-              <PlugZap className="size-3.5 shrink-0" />
-              {t("session.test.connected", {
-                version: testResult.serverVersion ?? t("session.test.unknownVersion"),
-                ms: testResult.elapsedMs,
-              })}
+      {/* Test status strip: rendered only while a test runs or a result is
+          showing, so no blank bordered bar sits above the action footer. */}
+      {(testPending || testResult !== null) && (
+        <div className="min-h-9 shrink-0 border-t px-4 py-2">
+          {testPending ? (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Spinner className="size-3.5" />
+              {t("session.testing")}
             </p>
-          ) : (
-            <p className="text-xs leading-snug text-destructive">
-              {testResult.error || t("session.test.failed")}
-            </p>
-          )
-        ) : null}
-      </div>
+          ) : testResult ? (
+            testResult.ok ? (
+              <p className="flex items-center gap-2 text-xs text-success">
+                <PlugZap className="size-3.5 shrink-0" />
+                {t("session.test.connected", {
+                  version: testResult.serverVersion ?? t("session.test.unknownVersion"),
+                  ms: testResult.elapsedMs,
+                })}
+              </p>
+            ) : (
+              <p className="text-xs leading-snug text-destructive">
+                {testResult.error || t("session.test.failed")}
+              </p>
+            )
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }

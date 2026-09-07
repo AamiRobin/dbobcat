@@ -43,7 +43,7 @@ interface UiState {
   setAboutOpen: (open: boolean) => void;
 }
 
-const THEME_KEY = "murmeli.theme";
+const THEME_KEY = "dbobcat.theme";
 
 function loadInitialTheme(): Theme {
   try {

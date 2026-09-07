@@ -69,7 +69,13 @@ function EditorArea() {
 function MainSplit() {
   return (
     <Group orientation="horizontal" className="min-h-0">
-      <Panel defaultSize="22" minSize="10" className="border-r">
+      {/* Sidebar tokens (not plain background) so the tree panel reads as a
+          distinct layer over the editor/log area, VS Code-style. */}
+      <Panel
+        defaultSize="22"
+        minSize="10"
+        className="border-r border-sidebar-border bg-sidebar"
+      >
         <DbTree />
       </Panel>
       <ResizeHandle />
@@ -115,7 +121,7 @@ export default function App() {
     // One-time bootstrap (guarded against StrictMode double-mount).
     if (!bootstrapped) {
       bootstrapped = true;
-      log("info", `Murmeli v${__APP_VERSION__} started.`);
+      log("info", `DBobcat v${__APP_VERSION__} started.`);
       void checkBackend();
       restoreTabs();
     }

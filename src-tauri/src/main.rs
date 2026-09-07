@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    murmeli_lib::run()
+    dbobcat_lib::run()
 }

@@ -525,7 +525,7 @@ pub async fn settings_import_from_file(
         let raw = std::fs::read(&path)?;
         let imported: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&raw)
             .map_err(|e| {
-                AppError::Config(format!("not a valid Murmeli settings export: {e}"))
+                AppError::Config(format!("not a valid DBobcat settings export: {e}"))
             })?;
 
         let store = app.store(settings::SETTINGS_FILE)?;

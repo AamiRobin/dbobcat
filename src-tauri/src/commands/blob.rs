@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn write_and_read_round_trip() {
-        let dir = std::env::temp_dir().join(format!("murmeli-blob-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dbobcat-blob-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("blob.bin");
         let path_str = path.to_string_lossy().to_string();
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn read_missing_file_is_io_error() {
-        let err = read_impl("/nonexistent/murmeli/blob.bin").unwrap_err();
+        let err = read_impl("/nonexistent/dbobcat/blob.bin").unwrap_err();
         assert!(err.to_string().contains("I/O error"));
     }
 }

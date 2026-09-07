@@ -330,9 +330,12 @@ function ToolButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
+        {/* Icon-only: the tooltip is visual only, so the accessible name
+            comes from the same literal string. */}
         <Button
           variant="ghost"
           size="icon-xs"
+          aria-label={tooltip}
           className="text-muted-foreground"
           disabled={disabled}
           onClick={onClick}

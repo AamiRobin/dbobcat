@@ -3236,7 +3236,7 @@ mod tls_pem_tests {
     );
 
     fn write_temp(name: &str, contents: &str) -> String {
-        let dir = std::env::temp_dir().join(format!("murmeli-tls-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dbobcat-tls-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(name);
         std::fs::write(&path, contents).unwrap();

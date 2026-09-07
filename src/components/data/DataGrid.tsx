@@ -670,18 +670,30 @@ function FilterCell({
   // Quick-filter "IN" filters have no inline editor; the chip + dialog own them.
   const inFilter = active?.op === "in";
 
+  // Styling-only "engaged" state: an applied term or a non-default draft
+  // (operator other than "=", or typed text) promotes the controls from
+  // ghost/transparent to bordered/toned so active filters read at a glance.
+  const engaged = active !== null || op !== "eq" || text !== "";
+
   return (
     <div
       style={{ width: column.width }}
       className={cn(
-        "flex shrink-0 items-center gap-1 border-r px-1",
+        "group/fc flex shrink-0 items-center gap-1 border-r px-1 transition-colors",
         active && "bg-warning/10",
       )}
     >
       <Select value={op} onValueChange={(v) => setOp(v as FilterOp)}>
         <SelectTrigger
           size="sm"
-          className="h-5! w-auto shrink-0 gap-0.5 border-none bg-transparent px-1! text-[10px] text-muted-foreground shadow-none"
+          className={cn(
+            "h-5! w-auto shrink-0 gap-0.5 border border-transparent px-1! text-[10px] shadow-none",
+            "bg-transparent dark:bg-transparent",
+            "transition-colors hover:border-input/60 hover:bg-accent/50 dark:hover:bg-accent/50",
+            engaged
+              ? "text-foreground"
+              : "text-muted-foreground/70 group-hover/fc:text-muted-foreground",
+          )}
           aria-label={`Filter operator for ${column.meta.name}`}
         >
           {inFilter ? "IN" : FILTER_OPS.find((o) => o.value === op)?.label}
@@ -707,7 +719,13 @@ function FilterCell({
             setText("");
           }
         }}
-        className="h-5 w-full min-w-0 rounded-sm bg-transparent text-[11px] outline-none placeholder:text-muted-foreground/50 focus:bg-accent/50 px-1"
+        className={cn(
+          "h-5 w-full min-w-0 rounded-sm border border-transparent bg-transparent px-1 text-[11px] outline-none transition-colors",
+          "placeholder:text-muted-foreground/50",
+          "hover:border-input/60 hover:bg-accent/30 dark:hover:bg-accent/30",
+          "focus-visible:border-ring focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring/40 dark:focus-visible:bg-input/30",
+          engaged && "border-input/70 bg-accent/25 dark:bg-input/30",
+        )}
         aria-label={`Filter value for ${column.meta.name}`}
       />
     </div>
@@ -757,6 +775,9 @@ const RealRow = memo(function RealRow({
         top: viStart,
         left: 0,
         height: ROW_HEIGHT,
+        // Shrink-to-fit would stop at the last column; stretch the row
+        // background/border across the full grid width instead.
+        minWidth: "100%",
       }}
       className={cn(
         "flex border-b",
@@ -819,7 +840,14 @@ const InsertRow = memo(function InsertRow({
 
   return (
     <div
-      style={{ position: "absolute", top: viStart, left: 0, height: ROW_HEIGHT }}
+      style={{
+        position: "absolute",
+        top: viStart,
+        left: 0,
+        height: ROW_HEIGHT,
+        // Same full-width stretch as RealRow (see comment there).
+        minWidth: "100%",
+      }}
       className={cn(
         "flex border-b border-success/30 bg-success/[0.08]",
         selected && "bg-success/20",

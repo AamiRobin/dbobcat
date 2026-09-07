@@ -1,33 +1,33 @@
 //! End-to-end smoke test against docker-hosted MySQL and Postgres.
-//! Skipped unless `MURMELI_PG_URL` / `MURMELI_MY_URL` are set so the
+//! Skipped unless `DBOBCAT_PG_URL` / `DBOBCAT_MY_URL` are set so the
 //! regular `cargo test` run stays hermetic.
 //!
 //! Brings up:
-//!   docker run -d --name murmeli-pg -e POSTGRES_PASSWORD=test \
-//!     -e POSTGRES_USER=test -e POSTGRES_DB=murmeli -p 5432:5432 \
+//!   docker run -d --name dbobcat-pg -e POSTGRES_PASSWORD=test \
+//!     -e POSTGRES_USER=test -e POSTGRES_DB=dbobcat -p 5432:5432 \
 //!     postgres:16-alpine
-//!   docker run -d --name murmeli-my -e MYSQL_ROOT_PASSWORD=test \
-//!     -e MYSQL_DATABASE=murmeli -p 3306:3306 mysql:8
+//!   docker run -d --name dbobcat-my -e MYSQL_ROOT_PASSWORD=test \
+//!     -e MYSQL_DATABASE=dbobcat -p 3306:3306 mysql:8
 //!
 //! Then run:
-//!   MURMELI_PG_URL=postgres://test:test@127.0.0.1:5432/murmeli \
-//!   MURMELI_MY_URL=mysql://root:test@127.0.0.1:3306/murmeli \
+//!   DBOBCAT_PG_URL=postgres://test:test@127.0.0.1:5432/dbobcat \
+//!   DBOBCAT_MY_URL=mysql://root:test@127.0.0.1:3306/dbobcat \
 //!   cargo test --test live_dbs -- --nocapture
 
 use std::env;
 
-use murmeli_lib::connections::manager::open_driver;
-use murmeli_lib::connections::{
+use dbobcat_lib::connections::manager::open_driver;
+use dbobcat_lib::connections::{
     QueryPageRequest, ResolvedConnectionConfig, RowValue, SslMode,
 };
-use murmeli_lib::connections::dialect::SqlDialect;
+use dbobcat_lib::connections::dialect::SqlDialect;
 
 fn pg_url() -> Option<String> {
-    env::var("MURMELI_PG_URL").ok()
+    env::var("DBOBCAT_PG_URL").ok()
 }
 
 fn my_url() -> Option<String> {
-    env::var("MURMELI_MY_URL").ok()
+    env::var("DBOBCAT_MY_URL").ok()
 }
 
 fn parse(url: &str) -> ResolvedConnectionConfig {
@@ -66,7 +66,7 @@ fn parse(url: &str) -> ResolvedConnectionConfig {
 #[tokio::test]
 async fn live_pg_full_path() {
     let Some(url) = pg_url() else {
-        eprintln!("skipping: MURMELI_PG_URL not set");
+        eprintln!("skipping: DBOBCAT_PG_URL not set");
         return;
     };
     let cfg = parse(&url);
@@ -120,7 +120,7 @@ async fn live_pg_full_path() {
 #[tokio::test]
 async fn live_my_full_path() {
     let Some(url) = my_url() else {
-        eprintln!("skipping: MURMELI_MY_URL not set");
+        eprintln!("skipping: DBOBCAT_MY_URL not set");
         return;
     };
     let cfg = parse(&url);
@@ -129,15 +129,15 @@ async fn live_my_full_path() {
     assert!(label.contains("mysql"), "label = {label}");
 
     let dbs = driver.list_databases().await.expect("list dbs");
-    assert!(dbs.iter().any(|d| d.name == "murmeli"));
+    assert!(dbs.iter().any(|d| d.name == "dbobcat"));
 
-    let tables = driver.list_tables("murmeli").await.expect("list tables");
+    let tables = driver.list_tables("dbobcat").await.expect("list tables");
     let names: Vec<_> = tables.iter().map(|t| t.name.clone()).collect();
     assert!(names.contains(&"customers".to_string()));
     assert!(names.contains(&"orders".to_string()));
 
     let cols = driver
-        .describe_table("murmeli", "orders")
+        .describe_table("dbobcat", "orders")
         .await
         .expect("describe orders");
     assert!(cols.iter().any(|c| c.name == "total"));
@@ -145,7 +145,7 @@ async fn live_my_full_path() {
 
     let page = driver
         .query_page(&QueryPageRequest {
-            db: "murmeli".to_string(),
+            db: "dbobcat".to_string(),
             table: "orders".to_string(),
             page_size: 100,
             offset: 0,

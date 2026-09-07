@@ -396,7 +396,7 @@ impl KnownHostsStore {
         // Mirrors Tauri's `app_data_dir` layout via the `dirs` crate, the
         // same convention as the credentials store.
         dirs::data_dir()
-            .map(|d| d.join("app.murmeli.desktop").join(KNOWN_HOSTS_FILE))
+            .map(|d| d.join("app.dbobcat.desktop").join(KNOWN_HOSTS_FILE))
             .ok_or_else(|| AppError::Config("could not resolve app data directory".into()))
     }
 
@@ -528,7 +528,7 @@ mod tests {
     /// Unique temp dir per test invocation so parallel tests don't clash.
     fn temp_store(tag: &str) -> KnownHostsStore {
         let dir = std::env::temp_dir().join(format!(
-            "murmeli-known-hosts-{}-{tag}",
+            "dbobcat-known-hosts-{}-{tag}",
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&dir);

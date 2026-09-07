@@ -17,7 +17,7 @@
 
 export const en = {
   // App shell
-  "app.name": "Murmeli",
+  "app.name": "DBobcat",
 
   // Toolbar
   "toolbar.connect": "Connect",
@@ -63,7 +63,7 @@ export const en = {
   "tx.popover.mode": "Manual transactions",
   "tx.popover.modeHint": "New statements run inside an explicit transaction.",
   "tx.popover.rowsAffected": "{count} row(s)",
-  "tx.footer.note": "Tracking Murmeli-issued statements.",
+  "tx.footer.note": "Tracking DBobcat-issued statements.",
   "tx.isolation.readUncommitted": "Read uncommitted",
   "tx.isolation.readCommitted": "Read committed",
   "tx.isolation.repeatableRead": "Repeatable read",
@@ -234,7 +234,7 @@ export const en = {
     "Fixed bindings for now; the registry is designed for remapping later.",
 
   // About dialog
-  "about.title": "About Murmeli",
+  "about.title": "About DBobcat",
   "about.tagline":
     "An open-source database GUI client for MySQL/MariaDB, PostgreSQL and SQLite.",
   "about.license": "Released under the MIT license.",
@@ -302,6 +302,7 @@ export const en = {
   "tree.favoritesOnly": "Favorites only",
   "tree.favorite.add": "Toggle favorite",
   "tree.favorite.remove": "Toggle favorite",
+  "tree.toggleColumns": "Toggle columns",
   "tree.noMatches": "No databases or objects match the filter.",
   "tree.noFavorites": "No favorites yet — star tables in the tree.",
   "tree.sessionAccent": "Session color",
@@ -363,7 +364,7 @@ export const en = {
   "palette.action.erDiagramPickDb":
     "Several databases on this server — pick one in the tree to view its ER diagram.",
   "palette.action.shortcuts": "Keyboard shortcuts",
-  "palette.action.about": "About Murmeli",
+  "palette.action.about": "About DBobcat",
 
   // ER diagram (Phase 11)
   "er.toolbar.fit": "Fit to view",

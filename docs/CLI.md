@@ -1,6 +1,6 @@
 # CLI flags & single-instance behavior
 
-Murmeli can be launched straight into a session from the command line,
+DBobcat can be launched straight into a session from the command line,
 HeidiSQL-style. Flags work on the initial launch **and** when a second
 invocation hands its arguments to the already-running instance
 (single-instance handoff).
@@ -19,16 +19,16 @@ Flags may be combined (`--connect local --new-query`).
 
 ```sh
 # Connect to the saved session named "local"
-murmeli --connect local
+dbobcat --connect local
 
 # Connect by session id and open an empty query tab
-murmeli --connect 7f3c... --new-query
+dbobcat --connect 7f3c... --new-query
 
 # Just open a fresh query tab on whatever is connected (or nothing)
-murmeli --new-query
+dbobcat --new-query
 
 # Handoff: the running app receives these args instead of starting twice
-murmeli -c production
+dbobcat -c production
 ```
 
 ## Resolution rules

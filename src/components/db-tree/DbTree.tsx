@@ -156,6 +156,12 @@ function Chevron({ open }: { open: boolean }) {
 interface RowProps {
   open?: boolean;
   onToggle?: () => void;
+  /**
+   * Chevron-only expand/collapse. When set, the chevron becomes its own
+   * nested button (FavoriteStar-style) so expanding the node never triggers
+   * the row's `onToggle` action.
+   */
+  onChevronToggle?: (e: React.MouseEvent) => void;
   onDoubleClick?: () => void;
   children: React.ReactNode;
   menu: React.ReactNode;
@@ -172,6 +178,7 @@ interface RowProps {
 function TreeRow({
   open = false,
   onToggle,
+  onChevronToggle,
   onDoubleClick,
   children,
   menu,
@@ -199,7 +206,34 @@ function TreeRow({
             className,
           )}
         >
-          <Chevron open={open} />
+          {onChevronToggle ? (
+            // Nested toggle (FavoriteStar pattern): clicks and keyboard must
+            // not reach the row's own onToggle handler. No padding, so the
+            // row geometry stays identical to the bare-chevron rows.
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={t("tree.toggleColumns")}
+              title={t("tree.toggleColumns")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onChevronToggle(e);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.stopPropagation();
+                  // KeyboardEvent shares the stopPropagation surface the
+                  // handlers need, so it stands in for a MouseEvent here.
+                  onChevronToggle(e as unknown as React.MouseEvent);
+                }
+              }}
+              className="shrink-0 rounded hover:bg-accent"
+            >
+              <Chevron open={open} />
+            </span>
+          ) : (
+            <Chevron open={open} />
+          )}
           {children}
         </button>
       </ContextMenuTrigger>
@@ -371,15 +405,22 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
     <li>
       <TreeRow
         open={open}
-        onToggle={() => setOpen(!open)}
-        // Heidi-style: opening a table shows its data; the designer stays on
-        // the context menu.
+        // Heidi-style: a single click on the row opens the table's data grid
+        // (repeated clicks refocus the existing tab) and expands the column
+        // list; the chevron alone expands/collapses without opening data.
+        onToggle={() => {
+          openData();
+          setOpen(true);
+        }}
+        onChevronToggle={() => setOpen(!open)}
+        // Redundant with the click above, but harmless (openDataTable dedupes
+        // tabs) and keeps dblclick paths working for assistive tech.
         onDoubleClick={openData}
         draggable
         onDragStart={(e) => {
           // Mirror the payload module-level: getData() is blocked on dragover.
           tableDragPayload = { db: database, table: table.name };
-          e.dataTransfer.setData("application/x-murmeli-table", JSON.stringify({ db: database, table: table.name }));
+          e.dataTransfer.setData("application/x-dbobcat-table", JSON.stringify({ db: database, table: table.name }));
           e.dataTransfer.effectAllowed = "move";
         }}
         onDragEnd={() => {
@@ -421,6 +462,7 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
             <MaintenanceSubmenu
               onPick={(op) => dialogs.openMaintenance({ db: database, tables: [table.name], op })}
             />
+            <ContextMenuSeparator />
             <ContextMenuItem onClick={() => dialogs.openPrompt({ kind: "rename", db: database, table: table.name })}>
               <Pencil />
               Rename…
@@ -429,6 +471,8 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
               <Copy />
               Duplicate Table…
             </ContextMenuItem>
+            {/* Destructive group, visually isolated from the safe actions. */}
+            <ContextMenuSeparator />
             <ContextMenuItem onClick={() => setConfirming("truncate")}>
               <Trash2 />
               Truncate…
@@ -508,7 +552,8 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
                   <Hash className="ml-3 mr-1 size-3 shrink-0 opacity-40" />
                 )}
                 <span className="truncate">{column.name}</span>
-                <span className="ml-auto shrink-0 rounded bg-secondary px-1 font-mono text-[10px] text-secondary-foreground/80">
+                {/* Plain dim mono text (VS Code-style tree metadata), not a pill. */}
+                <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
                   {column.dataType}
                 </span>
               </div>

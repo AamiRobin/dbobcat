@@ -36,7 +36,7 @@ pub enum TxMode {
     /// Every statement commits immediately (server default).
     #[default]
     Auto,
-    /// Statements run inside an explicit transaction opened by Murmeli.
+    /// Statements run inside an explicit transaction opened by DBobcat.
     Manual,
 }
 

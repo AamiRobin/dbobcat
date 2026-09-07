@@ -694,7 +694,7 @@ mod tests {
     #[test]
     fn gz_csv_round_trip_through_preview() {
         // Write a gzipped CSV and read it back through the importer path.
-        let path = std::env::temp_dir().join(format!("murmeli-test-{}.csv.gz", std::process::id()));
+        let path = std::env::temp_dir().join(format!("dbobcat-test-{}.csv.gz", std::process::id()));
         {
             let file = std::fs::File::create(&path).unwrap();
             let mut enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());

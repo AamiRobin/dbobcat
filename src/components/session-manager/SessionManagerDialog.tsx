@@ -67,7 +67,7 @@ type SavePayload = {
 };
 
 /** DnD payload marker so only session-row drags can trigger a regroup. */
-const SESSION_DRAG_MIME = "application/x-murmeli-session";
+const SESSION_DRAG_MIME = "application/x-dbobcat-session";
 
 /**
  * Shared dragover/drop wiring for tree drop targets; `newGroup` "" is the
@@ -346,8 +346,8 @@ export function SessionManagerDialog({
   const exportSettings = async () => {
     try {
       setExporting(true);
-      const path = await pickSavePath("murmeli-settings.json", [
-        { name: "Murmeli settings", extensions: ["json"] },
+      const path = await pickSavePath("dbobcat-settings.json", [
+        { name: "DBobcat settings", extensions: ["json"] },
       ]);
       if (!path) return;
       const summary = await ipc<SettingsExportSummary>("settings_export_to_file", { path });
@@ -365,7 +365,7 @@ export function SessionManagerDialog({
     try {
       setImporting(true);
       const path = await pickOpenPath([
-        { name: "Murmeli settings", extensions: ["json"] },
+        { name: "DBobcat settings", extensions: ["json"] },
       ]);
       if (!path) return;
       const summary = await ipc<SettingsImportSummary>("settings_import_from_file", {
@@ -483,7 +483,9 @@ export function SessionManagerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[560px] max-w-3xl flex-col gap-0 p-0 sm:max-w-3xl">
+      {/* Responsive height: fill on small viewports, cap on tall ones so the
+          two-pane grid (min-h-0) scrolls instead of leaving a blank strip. */}
+      <DialogContent className="flex h-[min(640px,90dvh)] max-w-3xl flex-col gap-0 p-0 sm:max-w-3xl">
         <DialogHeader className="border-b px-4 py-3">
           <DialogTitle>{t("session.title")}</DialogTitle>
           <DialogDescription>{t("session.description")}</DialogDescription>

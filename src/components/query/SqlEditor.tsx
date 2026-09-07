@@ -1,13 +1,13 @@
 import { sql } from "@codemirror/lang-sql";
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { oneDark } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useRef } from "react";
 
 import {
   createSearchExtensions,
   dialectToLang,
+  oneDarkSyntax,
   sqlChromeTheme,
 } from "@/components/common/SqlCodeEditor";
 import type { SqlDialect } from "@/types/ipc";
@@ -39,8 +39,6 @@ export interface SqlEditorProps {
   dialect?: SqlDialect;
 }
 
-const chromeTheme = sqlChromeTheme;
-
 export function SqlEditor({
   value,
   onChange,
@@ -50,6 +48,11 @@ export function SqlEditor({
   onViewReady,
   dialect,
 }: SqlEditorProps) {
+  // Theme-aware chrome: One Dark token colors on top, app-variable surfaces
+  // underneath (stable module-level instances, so identity only changes when
+  // the theme flips).
+  const chromeTheme = sqlChromeTheme(theme === "dark");
+
   // Latest run-request handler without rebuilding the keymap on every render.
   const runRef = useRef(onRequestRun);
   runRef.current = onRequestRun;
@@ -99,7 +102,7 @@ export function SqlEditor({
 
   const extensions = useMemo(
     () => [language, runKeys, ...createSearchExtensions(), chromeTheme],
-    [language, runKeys],
+    [language, runKeys, chromeTheme],
   );
 
   return (
@@ -108,7 +111,7 @@ export function SqlEditor({
       onChange={onChange}
       height="100%"
       style={{ height: "100%" }}
-      theme={theme === "dark" ? [oneDark, chromeTheme] : chromeTheme}
+      theme={theme === "dark" ? [oneDarkSyntax, chromeTheme] : chromeTheme}
       extensions={extensions}
       onCreateEditor={(view) => readyRef.current?.(view)}
       basicSetup={{

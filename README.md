@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="assets/brand/murmeli-mark.svg" alt="Murmeli logo — a sentinel marmot atop its burrow, drawn as a database cylinder" height="120">
+  <img src="assets/brand/dbobcat-mark.svg" alt="DBobcat logo — a tufted bobcat perched atop its den, drawn as a database cylinder" height="120">
 </p>
 
-<h1 align="center">Murmeli</h1>
+<h1 align="center">DBobcat</h1>
 
-Murmeli (Swiss-German for *marmot*) is an open-source, cross-platform database GUI client for MySQL/MariaDB, PostgreSQL, and SQLite — inspired by [HeidiSQL](https://www.heidisql.com/), built with a modern stack.
+DBobcat (**d**atabase + bobcat) is an open-source, cross-platform database GUI client for MySQL/MariaDB, PostgreSQL, and SQLite — inspired by [HeidiSQL](https://www.heidisql.com/), built with a modern stack.
 
-Repository: <https://github.com/AamiRobin/murmeli>
+Repository: <https://github.com/AamiRobin/dbobcat>
 
 ## Features
 
@@ -43,7 +43,7 @@ cargo clippy --all-targets -- -D warnings  # lint
 
 ## CLI flags
 
-`murmeli --connect <session>` / `murmeli --new-query [session]` — see [`docs/CLI.md`](docs/CLI.md).
+`dbobcat --connect <session>` / `dbobcat --new-query [session]` — see [`docs/CLI.md`](docs/CLI.md).
 
 ## License
 

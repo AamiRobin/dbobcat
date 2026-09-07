@@ -67,7 +67,8 @@
   --warning: oklch(0.828 0.189 84.429);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* Bright enough to stay visible at the 50% opacity focus rings use. */
+  --ring: oklch(0.708 0 0);
   --icon-blue: oklch(0.746 0.16 232.661);
   --icon-violet: oklch(0.702 0.183 293.541);
   --icon-teal: oklch(0.777 0.152 181.912);
@@ -76,7 +77,9 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
+  /* A step darker than --background so the tree panel reads as its own
+   * layer (VS Code-style panel separation). */
+  --sidebar: oklch(0.125 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -153,6 +156,42 @@
   html {
     @apply font-sans;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Scrollbars. Thin, theme-tinted overlay style (VS Code-like). The
+ * ::-webkit-* rules cover WKWebView (macOS); Chromium 121+ honors the
+ * standard `scrollbar-width`/`scrollbar-color` instead and ignores the
+ * pseudo-element rules, so both halves are kept in sync.
+ * ------------------------------------------------------------------------ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--foreground) 20%, transparent);
+  /* Transparent border + padding-box clip = thin pill instead of a slab. */
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--foreground) 35%, transparent);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* ---------------------------------------------------------------------------

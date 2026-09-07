@@ -4,8 +4,8 @@
 //! ask the running app to connect to a session and/or open a query tab:
 //!
 //! ```text
-//! murmeli --connect <session-name-or-id>
-//! murmeli --new-query [session-name-or-id]
+//! dbobcat --connect <session-name-or-id>
+//! dbobcat --new-query [session-name-or-id]
 //! ```
 //!
 //! The intent is parked in managed state; the frontend pulls it once on

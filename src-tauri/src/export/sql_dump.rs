@@ -377,9 +377,9 @@ mod tests {
 
     #[test]
     fn header_contains_app_and_time() {
-        let h = dump_header("Murmeli", "0.1.0");
+        let h = dump_header("DBobcat", "0.1.0");
         assert!(h.starts_with("-- "));
-        assert!(h.contains("-- Murmeli 0.1.0 SQL dump"));
+        assert!(h.contains("-- DBobcat 0.1.0 SQL dump"));
         assert!(h.contains("-- Generation time:"));
     }
 

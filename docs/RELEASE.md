@@ -1,6 +1,6 @@
 # Release Runbook
 
-Step-by-step for shipping a Murmeli release. The GitHub Actions workflow
+Step-by-step for shipping a DBobcat release. The GitHub Actions workflow
 (`.github/workflows/release.yml`) handles cross-platform builds and publishes
 to a GitHub Release, but it needs three secrets and one tag push.
 
@@ -15,7 +15,7 @@ brew install minisign
 
 # Generate the keypair. minisign prompts for a passphrase — store it in a
 # password manager; you'll set it as an Actions secret below.
-minisign -G -p murmeli-updater.pub -s murmeli-updater.key -c "Murmeli updater signing key"
+minisign -G -p dbobcat-updater.pub -s dbobcat-updater.key -c "DBobcat updater signing key"
 
 # minisign prints a base64-encoded secret key on the line beginning with
 # "Uncomment the..." — capture the whole block as-is for TAURI_SIGNING_PRIVATE_KEY.
@@ -28,7 +28,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 
 | Secret name | Value |
 |---|---|
-| `TAURI_UPDATER_PUBLIC_KEY` | contents of `murmeli-updater.pub` (one base64 line) |
+| `TAURI_UPDATER_PUBLIC_KEY` | contents of `dbobcat-updater.pub` (one base64 line) |
 | `TAURI_SIGNING_PRIVATE_KEY` | the base64 secret-key block from `minisign -G` output |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | passphrase you set when generating the key |
 
@@ -70,7 +70,7 @@ git push origin v0.1.0-rc.1
    - Windows: `-setup.exe` (NSIS, signed) + `.msi`
    - `latest.json` (merged from per-platform fragments)
 3. Sanity-check `latest.json` in the release:
-   `https://github.com/AamiRobin/murmeli/releases/latest/download/latest.json`
+   `https://github.com/AamiRobin/dbobcat/releases/latest/download/latest.json`
    should list all three platforms with non-empty `signature` and `url`.
 
 ## 6. Verify the updater from a real binary

@@ -329,7 +329,7 @@ export async function checkForUpdates(): Promise<void> {
     notify.success(`Update ${update.version} installed — restart to apply.`);
     const { confirm } = await import("@tauri-apps/plugin-dialog");
     const restart = await confirm("Update installed. Restart now?", {
-      title: "Restart Murmeli",
+      title: "Restart DBobcat",
       kind: "info",
     });
     if (restart) {

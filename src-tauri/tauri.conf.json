@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Murmeli",
+  "productName": "DBobcat",
   "version": "0.1.0",
-  "identifier": "app.murmeli.desktop",
+  "identifier": "app.dbobcat.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Murmeli",
+        "title": "DBobcat",
         "width": 1280,
         "height": 800,
         "minWidth": 800,
@@ -29,9 +29,9 @@
     "publisher": "Amir Robin",
     "copyright": "© 2026 Amir Robin — MIT licensed",
     "category": "DeveloperTool",
-    "homepage": "https://github.com/AamiRobin/murmeli",
+    "homepage": "https://github.com/AamiRobin/dbobcat",
     "shortDescription": "Open-source database GUI client",
-    "longDescription": "Murmeli is an open-source, cross-platform database GUI client for MySQL/MariaDB, PostgreSQL, and SQLite. It offers a session manager with SSH tunnels and encrypted password storage, a virtualized data grid with change posting, a SQL editor with schema-driven completion, a table designer with ALTER preview, export/import across many formats, and server administration tools.",
+    "longDescription": "DBobcat is an open-source, cross-platform database GUI client for MySQL/MariaDB, PostgreSQL, and SQLite. It offers a session manager with SSH tunnels and encrypted password storage, a virtualized data grid with change posting, a SQL editor with schema-driven completion, a table designer with ALTER preview, export/import across many formats, and server administration tools.",
     "linux": {
       "appimage": {
         "bundleMediaFramework": false
