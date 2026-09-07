@@ -34,6 +34,8 @@ import { useUiStore } from "@/stores/ui";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import { openServerToolTab, openTab, type TabType } from "@/stores/tabs";
+import { isMac, usesInAppWindowControls } from "@/lib/platform";
+import { WindowControls } from "@/components/layout/WindowControls";
 
 function NewTabMenu() {
   const items: { type: TabType; label: string; icon: typeof FileCode }[] = [
@@ -107,8 +109,9 @@ export function Toolbar() {
   const serverToolsReady = status === "connected" && connId !== null && dialect !== "sqlite";
 
   // macOS draws the traffic lights over the header (titleBarStyle: Overlay);
-  // other platforms keep the native title bar, so no extra inset is needed.
-  const trafficLightInset = /Mac/i.test(navigator.userAgent) ? "pl-[78px]" : "";
+  // other platforms go frameless and render Windows-style controls on the
+  // right instead (see WindowControls).
+  const trafficLightInset = isMac ? "pl-[78px]" : "";
 
   return (
     <header
@@ -286,6 +289,8 @@ export function Toolbar() {
           </Tooltip>
         </ButtonGroup>
       </div>
+
+      {usesInAppWindowControls && <WindowControls />}
 
       <SessionManagerDialog
         open={sessionManagerOpen}

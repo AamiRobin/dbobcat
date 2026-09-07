@@ -112,6 +112,15 @@ pub fn run() {
                 app.manage(ConnectionManager::new());
                 app.manage(LaunchIntentState::new());
 
+                // Windows/Linux: drop the native title bar so the app header
+                // carries Windows-style window controls on the right (see
+                // src/components/layout/WindowControls.tsx). macOS keeps its
+                // traffic lights via titleBarStyle Overlay in tauri.conf.json.
+                #[cfg(not(target_os = "macos"))]
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(false);
+                }
+
                 // Park any CLI launch intent; the webview pulls it once ready
                 // via `app_take_launch_intent`.
                 let args: Vec<String> = std::env::args().collect();
