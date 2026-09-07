@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { ListTree, MessageSquare } from "lucide-react";
+import { Download, ListTree, MessageSquare } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { QueryResultGrid } from "@/components/query/QueryResultGrid";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
@@ -29,6 +30,10 @@ interface QueryResultsProps {
   planAnalyze: boolean;
   /** Bumped on every completed explain — focuses the plan tab. */
   planNonce: number;
+  /** Exports the visible result set (lives on the results strip). */
+  onExport?: () => void;
+  /** Whether a result set is showing to export. */
+  canExport?: boolean;
 }
 
 const RESULT_LINE_CLASS = "text-muted-foreground";
@@ -51,6 +56,8 @@ export function QueryResults({
   planLoading,
   planAnalyze,
   planNonce,
+  onExport,
+  canExport,
 }: QueryResultsProps) {
   const resultSetIndexes = outcomes
     .map((o, i) => (o.kind === "result_set" ? i : -1))
@@ -109,6 +116,18 @@ export function QueryResults({
             </TabsTrigger>
           ))}
         </TabsList>
+        {onExport && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="ml-auto mr-0.5"
+            disabled={!canExport}
+            onClick={onExport}
+          >
+            <Download data-icon="inline-start" />
+            Export
+          </Button>
+        )}
       </div>
 
       <TabsContent value="messages" className="min-h-0 data-[state=inactive]:hidden">

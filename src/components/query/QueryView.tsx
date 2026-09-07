@@ -7,10 +7,10 @@ import {
   ChevronDown,
   ChevronRight,
   Database,
-  Download,
   ListTree,
   PanelRight,
   Play,
+  Settings2,
   TextSelect,
 } from "lucide-react";
 
@@ -28,6 +28,8 @@ import { SqlEditor, type RunRequestKind } from "@/components/query/SqlEditor";
 import { setActiveQueryRunner } from "@/lib/shortcuts";
 import { hasImplicitCommitDdl } from "@/lib/tx-classify";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
@@ -418,40 +420,49 @@ export function QueryView({ tab }: { tab: Tab }) {
       {/* toolbar; overflow-x so narrow windows scroll instead of crushing
           the right-side labels into multi-line blobs */}
       <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b bg-muted/40 px-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="xs" disabled={!canRun} onClick={() => handleRunRequest("all")}>
-              {running ? <Spinner data-icon="inline-start" /> : <Play data-icon="inline-start" />}
-              Run
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Run whole script (F9)</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="xs"
-              disabled={!canRun}
-              onClick={() => handleRunRequest("selection")}
-            >
-              <TextSelect data-icon="inline-start" />
-              Run Selection
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Run selection, or everything (Ctrl+Enter)</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="xs" disabled={!canRun} onClick={handleRunCurrentStatement}>
-              <ChevronRight data-icon="inline-start" />
-              Current Statement
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Run statement under cursor</TooltipContent>
-        </Tooltip>
+        {/* Run split: primary runs the whole script; alternates in the menu. */}
+        <ButtonGroup className="h-6 items-center">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="rounded-r-none"
+                disabled={!canRun}
+                onClick={() => handleRunRequest("all")}
+              >
+                {running ? <Spinner data-icon="inline-start" /> : <Play data-icon="inline-start" />}
+                Run
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Run whole script (F9)</TooltipContent>
+          </Tooltip>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="rounded-l-none px-0.5"
+                disabled={!canRun}
+                aria-label="More ways to run"
+              >
+                <ChevronDown />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuGroup>
+                <DropdownMenuItem className="text-xs" onClick={() => handleRunRequest("selection")}>
+                  <TextSelect data-icon="inline-start" />
+                  Run selection
+                </DropdownMenuItem>
+                <DropdownMenuItem className="text-xs" onClick={handleRunCurrentStatement}>
+                  <ChevronRight data-icon="inline-start" />
+                  Current statement
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </ButtonGroup>
 
         <DropdownMenu>
           <Tooltip>
@@ -490,21 +501,6 @@ export function QueryView({ tab }: { tab: Tab }) {
             </Button>
           </TooltipTrigger>
           <TooltipContent>Format SQL</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="xs"
-              disabled={!hasVisibleResultSet}
-              onClick={handleExportResults}
-            >
-              <Download data-icon="inline-start" />
-              Export Results…
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Export the visible result set</TooltipContent>
         </Tooltip>
 
         <QueryHistoryMenu onSelect={handleHistorySelect} />
@@ -553,14 +549,29 @@ export function QueryView({ tab }: { tab: Tab }) {
             </Select>
           </label>
 
-          <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
-            Stop on error
-            <Switch
-              checked={qState.stopOnError}
-              onCheckedChange={(checked) => patch(tabId, { stopOnError: checked })}
-              aria-label="Stop on error"
-            />
-          </label>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon-xs" aria-label="Query settings" className="relative">
+                <Settings2 />
+                {qState.stopOnError && (
+                  <span
+                    aria-hidden
+                    className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary"
+                  />
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-56 p-3">
+              <label className="flex items-center justify-between gap-3 text-xs">
+                Stop on error
+                <Switch
+                  checked={qState.stopOnError}
+                  onCheckedChange={(checked) => patch(tabId, { stopOnError: checked })}
+                  aria-label="Stop on error"
+                />
+              </label>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
@@ -603,6 +614,8 @@ export function QueryView({ tab }: { tab: Tab }) {
                         onActiveResultSetChange={setActiveResultSet}
                         connId={connId}
                         dbContext={db}
+                        onExport={handleExportResults}
+                        canExport={hasVisibleResultSet}
                         plan={qState.plan}
                         planLoading={qState.planLoading}
                         planAnalyze={qState.planAnalyze}
