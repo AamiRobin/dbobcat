@@ -252,6 +252,14 @@ export function buildActionItems(ctx: PaletteActionContext): PaletteActionItem[]
       kbd: null,
       run: () => dispatchAction("view.toggle-theme"),
     },
+    {
+      type: "action",
+      id: "action.system-theme",
+      labelKey: "palette.action.systemTheme",
+      icon: "monitor",
+      kbd: null,
+      run: () => dispatchAction("view.system-theme"),
+    },
   );
 
   if (isServerToolsReady(ctx)) {

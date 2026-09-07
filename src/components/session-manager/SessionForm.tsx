@@ -132,7 +132,7 @@ export function SessionForm({
                 "flex flex-col items-center gap-1 rounded-md border px-2 py-2 text-[11px] transition-colors",
                 draft.engine === value
                   ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground hover:bg-accent/60",
+                  : "border-border text-muted-foreground hover:bg-accent",
               )}
             >
               <Icon className="size-4" />

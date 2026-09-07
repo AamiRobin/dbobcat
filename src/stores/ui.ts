@@ -4,6 +4,8 @@ import type { Lang } from "@/lib/i18n";
 import { setLang } from "@/lib/i18n";
 
 export type Theme = "dark" | "light";
+/** User preference: explicit choice, or follow the OS appearance. */
+export type ThemePref = "system" | Theme;
 
 /** Snapshot of the active data grid or query run, shown in the status bar. */
 export interface DataStats {
@@ -16,6 +18,8 @@ export interface DataStats {
 
 interface UiState {
   theme: Theme;
+  /** Persisted preference; `theme` is its resolution ("system" → OS look). */
+  themePref: ThemePref;
   /** UI language (Phase 8 i18n groundwork; only "en" ships for now). */
   lang: Lang;
   logCollapsed: boolean;
@@ -34,6 +38,10 @@ interface UiState {
   setLang: (lang: Lang) => void;
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
+  /** Resume auto-detection: theme follows the OS appearance again. */
+  followSystemTheme: () => void;
+  /** Re-resolve from the OS after an appearance change while on "system". */
+  syncSystemTheme: () => void;
   setLogCollapsed: (collapsed: boolean) => void;
   toggleLogCollapsed: () => void;
   setDataStats: (stats: DataStats) => void;
@@ -43,25 +51,48 @@ interface UiState {
   setAboutOpen: (open: boolean) => void;
 }
 
-const THEME_KEY = "dbobcat.theme";
+const THEME_PREF_KEY = "dbobcat.themePref";
 
-function loadInitialTheme(): Theme {
+/**
+ * OS appearance query (macOS dark/light auto-switch). Null when matchMedia
+ * is unavailable (tests, non-browser envs) so callers fall back to dark.
+ */
+const systemDarkQuery =
+  typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : null;
+
+function systemTheme(): Theme {
+  return systemDarkQuery?.matches ? "dark" : "light";
+}
+
+function resolveTheme(pref: ThemePref): Theme {
+  return pref === "system" ? systemTheme() : pref;
+}
+
+function loadInitialThemePref(): ThemePref {
   try {
-    const stored = localStorage.getItem(THEME_KEY);
-    if (stored === "dark" || stored === "light") return stored;
+    const stored = localStorage.getItem(THEME_PREF_KEY);
+    if (stored === "system" || stored === "dark" || stored === "light") return stored;
   } catch {
-    // storage unavailable — fall through to default
+    // storage unavailable — fall through to the default
   }
-  return "dark"; // dark mode by default on first launch
+  // Default is following the OS. The legacy "dbobcat.theme" key is ignored on
+  // purpose: the old code rewrote it on every startup, so its value never
+  // reflected a deliberate user choice.
+  return "system";
+}
+
+function persistThemePref(pref: ThemePref): void {
+  try {
+    localStorage.setItem(THEME_PREF_KEY, pref);
+  } catch {
+    // non-fatal
+  }
 }
 
 export function applyTheme(theme: Theme): void {
   document.documentElement.classList.toggle("dark", theme === "dark");
-  try {
-    localStorage.setItem(THEME_KEY, theme);
-  } catch {
-    // non-fatal
-  }
 }
 
 /**
@@ -86,8 +117,11 @@ function fadeThemeFlip(theme: Theme): void {
   themeFadeTimer = setTimeout(() => root.classList.remove("theme-fade"), 220);
 }
 
+const initialThemePref = loadInitialThemePref();
+
 export const useUiStore = create<UiState>((set, get) => ({
-  theme: loadInitialTheme(),
+  theme: resolveTheme(initialThemePref),
+  themePref: initialThemePref,
   lang: "en",
   logCollapsed: false,
   dataStats: null,
@@ -104,12 +138,30 @@ export const useUiStore = create<UiState>((set, get) => ({
   setTheme: (theme) => {
     // Commit store state first so subscribers observe the new value in the
     // same tick; DOM/localStorage application follows as a pure side effect.
-    set({ theme });
+    persistThemePref(theme);
+    set({ themePref: theme, theme });
     fadeThemeFlip(theme);
     applyTheme(theme);
   },
 
   toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),
+
+  followSystemTheme: () => {
+    const theme = systemTheme();
+    persistThemePref("system");
+    set({ themePref: "system", theme });
+    fadeThemeFlip(theme);
+    applyTheme(theme);
+  },
+
+  syncSystemTheme: () => {
+    if (get().themePref !== "system") return;
+    const theme = systemTheme();
+    if (theme === get().theme) return;
+    set({ theme });
+    fadeThemeFlip(theme);
+    applyTheme(theme);
+  },
 
   setLogCollapsed: (collapsed) => set({ logCollapsed: collapsed }),
   toggleLogCollapsed: () => set((s) => ({ logCollapsed: !s.logCollapsed })),
@@ -122,3 +174,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   setAboutOpen: (aboutOpen) => set({ aboutOpen }),
 }));
+
+// Live-follow OS appearance changes (e.g. macOS auto dark/light schedule)
+// while the preference is "system"; explicit choices opt out.
+systemDarkQuery?.addEventListener("change", () => {
+  useUiStore.getState().syncSystemTheme();
+});

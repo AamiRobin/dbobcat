@@ -265,6 +265,9 @@ export async function dispatchAction(actionId: string): Promise<void> {
     case "view.toggle-theme":
       useUiStore.getState().toggleTheme();
       break;
+    case "view.system-theme":
+      useUiStore.getState().followSystemTheme();
+      break;
     case "view.toggle-log":
       useUiStore.getState().toggleLogCollapsed();
       break;

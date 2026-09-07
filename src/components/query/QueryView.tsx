@@ -422,8 +422,9 @@ export function QueryView({ tab }: { tab: Tab }) {
   // -- render ---------------------------------------------------------------
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* toolbar */}
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b bg-muted/40 px-1">
+      {/* toolbar; overflow-x so narrow windows scroll instead of crushing
+          the right-side labels into multi-line blobs */}
+      <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b bg-muted/40 px-1">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="xs" disabled={!canRun} onClick={() => handleRunRequest("all")}>
@@ -512,7 +513,7 @@ export function QueryView({ tab }: { tab: Tab }) {
 
         <QueryHistoryMenu onSelect={handleHistorySelect} />
 
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-3">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -534,7 +535,7 @@ export function QueryView({ tab }: { tab: Tab }) {
             </span>
           )}
 
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
             <Database className="size-3.5" />
             <Select
               value={db ?? ""}
@@ -553,7 +554,7 @@ export function QueryView({ tab }: { tab: Tab }) {
             </Select>
           </label>
 
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
             Stop on error
             <Switch
               checked={qState.stopOnError}

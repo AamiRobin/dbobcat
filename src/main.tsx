@@ -7,7 +7,8 @@ import { queryClient } from "./lib/query-client";
 import { applyTheme, useUiStore } from "./stores/ui";
 import "./index.css";
 
-// Apply persisted theme (default: dark) before first paint.
+// Apply the persisted theme preference (default: follow the OS appearance)
+// to <html> before first paint.
 applyTheme(useUiStore.getState().theme);
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

@@ -126,7 +126,7 @@ function SessionTreeList({
           "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs",
           selectedId === null
             ? "bg-accent text-accent-foreground"
-            : "hover:bg-accent/50",
+            : "hover:bg-accent",
           rootOver && "ring-1 ring-primary/40 bg-primary/5",
         )}
       >
@@ -189,7 +189,7 @@ function GroupNode({
         onClick={() => toggleCollapsed(group.path)}
         {...sessionDropHandlers(onRegroup, group.path, setOver)}
         className={cn(
-          "flex w-full items-center gap-1 rounded-md px-1 py-1 text-left text-xs hover:bg-accent/50",
+          "flex w-full items-center gap-1 rounded-md px-1 py-1 text-left text-xs hover:bg-accent",
           over && "ring-1 ring-primary/40 bg-primary/5",
         )}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
@@ -255,7 +255,7 @@ function SessionRow({
       style={{ paddingLeft: `${depth * 12 + 4}px` }}
       className={cn(
         "flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-xs",
-        selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+        selected ? "bg-accent text-accent-foreground" : "hover:bg-accent",
       )}
     >
       {color ? (

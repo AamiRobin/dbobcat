@@ -354,6 +354,7 @@ export const en = {
   "palette.action.disconnect": "Disconnect active session",
   "palette.action.refreshTree": "Refresh database tree",
   "palette.action.toggleTheme": "Toggle light/dark theme",
+  "palette.action.systemTheme": "Follow system theme (auto)",
   "palette.action.userManager": "User manager",
   "palette.action.processList": "Process list",
   "palette.action.variables": "Variables & status",
