@@ -8,11 +8,16 @@ export interface LogEntry {
   ts: number;
   level: LogLevel;
   message: string;
+  /**
+   * Executed SQL carried by the entry (full SQL logging, HeidiSQL parity).
+   * When present the message log renders a re-run affordance.
+   */
+  sql?: string;
 }
 
 interface LogState {
   logs: LogEntry[];
-  pushLog: (level: LogLevel, message: string) => void;
+  pushLog: (level: LogLevel, message: string, sql?: string) => void;
   clearLogs: () => void;
 }
 
@@ -24,11 +29,11 @@ let logSeq = 0;
 export const useLogStore = create<LogState>((set) => ({
   logs: [],
 
-  pushLog: (level, message) =>
+  pushLog: (level, message, sql) =>
     set((s) => ({
       logs: [
         ...s.logs.slice(-(MAX_LOG_ENTRIES - 1)),
-        { id: `log-${++logSeq}`, ts: Date.now(), level, message },
+        { id: `log-${++logSeq}`, ts: Date.now(), level, message, sql },
       ],
     })),
 
@@ -40,6 +45,6 @@ export const useLogStore = create<LogState>((set) => ({
  * (e.g. after an IPC round-trip). Components should read
  * `useLogStore(s => s.logs)`.
  */
-export function log(level: LogLevel, message: string): void {
-  useLogStore.getState().pushLog(level, message);
+export function log(level: LogLevel, message: string, sql?: string): void {
+  useLogStore.getState().pushLog(level, message, sql);
 }

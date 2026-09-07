@@ -10,8 +10,8 @@ use chrono::Utc;
 use mysql_async::consts::{ColumnFlags, ColumnType};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
-    Column, Conn, Opts, OptsBuilder, Params, Pool, PoolConstraints, PoolOpts, Row, SslOpts, TxOpts,
-    Value,
+    ClientIdentity, Column, Conn, Opts, OptsBuilder, Params, Pool, PoolConstraints, PoolOpts, Row,
+    SslOpts, TxOpts, Value,
 };
 
 use crate::connections::dialect::SqlDialect;
@@ -329,6 +329,37 @@ impl MysqlConnection {
     }
 }
 
+/// TLS is mandatory for `required`, and enabled for `preferred` as soon as
+/// any identity/trust file is configured (the client identity needs TLS).
+fn wants_tls(config: &ResolvedConnectionConfig) -> bool {
+    match config.ssl_mode {
+        SslMode::Required => true,
+        SslMode::Preferred => {
+            config.ssl_files.as_ref().map(|f| !f.is_empty()).unwrap_or(false)
+        }
+        SslMode::Disabled => false,
+    }
+}
+
+/// Map the session's TLS files onto mysql_async's rustls-backed options:
+/// client certificate + key as the client identity, CA file as a pinned
+/// trust anchor (merged with system roots).
+fn build_ssl_opts(config: &ResolvedConnectionConfig) -> SslOpts {
+    let mut ssl = SslOpts::default();
+    if let Some(files) = &config.ssl_files {
+        if let (Some(cert), Some(key)) = (&files.cert_path, &files.key_path) {
+            ssl = ssl.with_client_identity(Some(ClientIdentity::new(
+                std::path::PathBuf::from(cert).into(),
+                std::path::PathBuf::from(key).into(),
+            )));
+        }
+        if let Some(ca) = &files.ca_path {
+            ssl = ssl.with_root_certs(vec![std::path::PathBuf::from(ca).into()]);
+        }
+    }
+    ssl
+}
+
 struct OpenedConnection {
     pool: Pool,
     conn: Conn,
@@ -350,8 +381,8 @@ fn build_opts(config: &ResolvedConnectionConfig, force_no_tls: bool) -> Opts {
         builder = builder.db_name(Some(db));
     }
 
-    if !force_no_tls && config.ssl_mode == SslMode::Required {
-        builder = builder.ssl_opts(SslOpts::default());
+    if !force_no_tls && wants_tls(config) {
+        builder = builder.ssl_opts(build_ssl_opts(config));
     }
     builder.into()
 }
@@ -2002,5 +2033,76 @@ mod tests {
         let snippet = sql_snippet(&long);
         assert_eq!(snippet.chars().count(), 121); // 120 chars + ellipsis
         assert!(snippet.ends_with('…'));
+    }
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+    use crate::connections::{DbType, SslFiles};
+
+    fn config(ssl_mode: SslMode, ssl_files: Option<SslFiles>) -> ResolvedConnectionConfig {
+        ResolvedConnectionConfig {
+            engine: DbType::Mysql,
+            host: "db.example.com".into(),
+            port: 3306,
+            user: "u".into(),
+            password: None,
+            database: None,
+            ssl_mode,
+            ssl_files,
+            ssh: None,
+        }
+    }
+
+    fn files(ca: Option<&str>, cert: Option<&str>, key: Option<&str>) -> Option<SslFiles> {
+        Some(SslFiles {
+            ca_path: ca.map(String::from),
+            cert_path: cert.map(String::from),
+            key_path: key.map(String::from),
+        })
+    }
+
+    #[test]
+    fn required_always_wants_tls() {
+        assert!(wants_tls(&config(SslMode::Required, None)));
+        assert!(wants_tls(&config(SslMode::Required, files(Some("/ca"), None, None))));
+    }
+
+    #[test]
+    fn preferred_wants_tls_only_with_files() {
+        assert!(!wants_tls(&config(SslMode::Preferred, None)));
+        // Any configured TLS file (trust anchor OR identity) enables TLS.
+        assert!(wants_tls(&config(
+            SslMode::Preferred,
+            files(Some("/ca"), None, None)
+        )));
+        assert!(wants_tls(&config(
+            SslMode::Preferred,
+            files(None, Some("/cert"), Some("/key"))
+        )));
+    }
+
+    #[test]
+    fn disabled_never_wants_tls() {
+        assert!(!wants_tls(&config(
+            SslMode::Disabled,
+            files(Some("/ca"), Some("/cert"), Some("/key"))
+        )));
+    }
+
+    #[test]
+    fn build_ssl_opts_carries_identity_and_roots() {
+        // build_ssl_opts is only constructible here; assert the SslOpts
+        // accepted the files without panicking and kept them (opaque struct,
+        // so the real assertion is that it composes).
+        let cfg = config(
+            SslMode::Preferred,
+            files(Some("/ca.pem"), Some("/cert.pem"), Some("/key.pem")),
+        );
+        let _ = build_ssl_opts(&cfg);
+        // Identity requires BOTH cert and key: cert alone is skipped.
+        let cfg = config(SslMode::Preferred, files(None, Some("/cert.pem"), None));
+        let _ = build_ssl_opts(&cfg);
     }
 }

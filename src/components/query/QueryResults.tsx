@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { MessageSquare } from "lucide-react";
+import { ListTree, MessageSquare } from "lucide-react";
 
 import { QueryResultGrid } from "@/components/query/QueryResultGrid";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cellDisplayText } from "@/lib/grid-columns";
 import { formatElapsed } from "@/lib/query-queries";
 import { cn } from "@/lib/utils";
-import type { QueryOutcome } from "@/types/ipc";
+import type { ExplainStatement, QueryOutcome } from "@/types/ipc";
 
 interface QueryResultsProps {
   tabId: string;
@@ -21,14 +23,20 @@ interface QueryResultsProps {
   /** Connection + database context for updatable result grids (Phase 9-A). */
   connId: number | null;
   dbContext: string | null;
+  /** EXPLAIN output of the last explain request (Plan tab). */
+  plan: ExplainStatement[] | null;
+  planLoading: boolean;
+  planAnalyze: boolean;
+  /** Bumped on every completed explain — focuses the plan tab. */
+  planNonce: number;
 }
 
 const RESULT_LINE_CLASS = "text-muted-foreground";
 const ERROR_CLASS = "text-destructive";
 
 /**
- * Bottom half of a query tab: a "Messages" summary plus one virtualized
- * read-only grid per returned result set.
+ * Bottom half of a query tab: a "Messages" summary, one virtualized
+ * read-only grid per returned result set, and an EXPLAIN "Plan" tab.
  */
 export function QueryResults({
   tabId,
@@ -39,6 +47,10 @@ export function QueryResults({
   onActiveResultSetChange,
   connId,
   dbContext,
+  plan,
+  planLoading,
+  planAnalyze,
+  planNonce,
 }: QueryResultsProps) {
   const resultSetIndexes = outcomes
     .map((o, i) => (o.kind === "result_set" ? i : -1))
@@ -56,12 +68,18 @@ export function QueryResults({
     setActiveTab(firstResultSet);
   }, [runNonce, firstResultSet]);
 
+  // A completed explain pulls focus to the plan tab.
+  useEffect(() => {
+    if (planNonce > 0) setActiveTab("plan");
+  }, [planNonce]);
+
   useEffect(() => {
     const match = /^res-(\d+)$/.exec(activeTab);
     onActiveResultSetChange?.(match ? Number(match[1]) : null);
   }, [activeTab, onActiveResultSetChange]);
 
   const errorCount = outcomes.filter((o) => o.kind === "error").length;
+  const showPlanTab = planLoading || plan !== null;
 
   return (
     <Tabs
@@ -78,6 +96,13 @@ export function QueryResults({
               <span className={cn("ml-1 font-semibold", ERROR_CLASS)}>({errorCount})</span>
             )}
           </TabsTrigger>
+          {showPlanTab && (
+            <TabsTrigger value="plan" className="gap-1 text-xs">
+              <ListTree className="size-3 text-muted-foreground" />
+              Plan
+              {planAnalyze && <span className="ml-1 text-muted-foreground">(analyze)</span>}
+            </TabsTrigger>
+          )}
           {resultSetIndexes.map((idx) => (
             <TabsTrigger key={idx} value={`res-${idx}`} className="text-xs">
               Result {(resultSetIndexes.indexOf(idx) + 1).toLocaleString()}
@@ -113,6 +138,12 @@ export function QueryResults({
         </ScrollArea>
       </TabsContent>
 
+      {showPlanTab && (
+        <TabsContent value="plan" className="min-h-0 data-[state=inactive]:hidden">
+          <PlanView plan={plan} loading={planLoading} analyze={planAnalyze} />
+        </TabsContent>
+      )}
+
       {resultSetIndexes.map((idx) => {
         const outcome = outcomes[idx];
         if (outcome.kind !== "result_set") return null;
@@ -133,6 +164,98 @@ export function QueryResults({
         );
       })}
     </Tabs>
+  );
+}
+
+/** Plan statements: source SQL, per-statement status, engine plan table. */
+function PlanView({
+  plan,
+  loading,
+  analyze,
+}: {
+  plan: ExplainStatement[] | null;
+  loading: boolean;
+  analyze: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
+        <Spinner className="size-4" />
+        Explaining script…
+      </div>
+    );
+  }
+  if (!plan || plan.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+        No plan.
+      </div>
+    );
+  }
+  return (
+    <ScrollArea className="h-full">
+      <div className="space-y-3 p-3">
+        {plan.map((stmt, i) => (
+          <PlanStatement key={i} stmt={stmt} index={i} analyze={analyze} />
+        ))}
+      </div>
+    </ScrollArea>
+  );
+}
+
+function PlanStatement({
+  stmt,
+  index,
+  analyze,
+}: {
+  stmt: ExplainStatement;
+  index: number;
+  analyze: boolean;
+}) {
+  return (
+    <div className="overflow-hidden rounded-md border">
+      <div className="flex items-center gap-2 border-b bg-muted/40 px-2 py-1.5">
+        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+          #{index + 1}
+        </span>
+        <code className="min-w-0 flex-1 truncate font-mono text-[11px]" title={stmt.sourceSql}>
+          {stmt.sourceSql}
+        </code>
+        {stmt.skipped ? (
+          <span className="shrink-0 text-[11px] text-muted-foreground">{stmt.note}</span>
+        ) : stmt.error ? (
+          <span className="shrink-0 text-[11px] text-destructive">{stmt.error}</span>
+        ) : (
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {analyze ? "analyzed" : "planned"} · {formatElapsed(stmt.elapsedMs)}
+          </span>
+        )}
+      </div>
+      {!stmt.skipped && !stmt.error && stmt.columns && (
+        <table className="w-full border-collapse font-mono text-[11px]">
+          <thead>
+            <tr className="border-b bg-muted/20 text-left text-muted-foreground">
+              {stmt.columns.map((col) => (
+                <th key={col} className="px-2 py-1 font-medium">
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {stmt.rows.map((row, r) => (
+              <tr key={r} className="border-b last:border-b-0">
+                {row.map((cell, c) => (
+                  <td key={c} className="max-w-96 truncate px-2 py-1 align-top">
+                    {cellDisplayText(cell)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 

@@ -37,11 +37,14 @@ interface TreeDialogsState {
   maintenance: MaintenanceDialogRequest | null;
   prompt: PromptDialogRequest | null;
   copyTable: CopyTableRequest | null;
+  /** "Bulk Table Editor…" (MySQL/MariaDB parity). */
+  bulkAlter: { db: string } | null;
 
   openBulk: (req: BulkDialogRequest) => void;
   openMaintenance: (req: MaintenanceDialogRequest) => void;
   openPrompt: (req: PromptDialogRequest) => void;
   openCopyTable: (req: CopyTableRequest) => void;
+  openBulkAlter: (req: { db: string }) => void;
   closeAll: () => void;
 }
 
@@ -50,10 +53,13 @@ export const useTreeDialogsStore = create<TreeDialogsState>((set) => ({
   maintenance: null,
   prompt: null,
   copyTable: null,
+  bulkAlter: null,
 
   openBulk: (bulk) => set({ bulk }),
   openMaintenance: (maintenance) => set({ maintenance }),
   openPrompt: (prompt) => set({ prompt }),
   openCopyTable: (copyTable) => set({ copyTable }),
-  closeAll: () => set({ bulk: null, maintenance: null, prompt: null, copyTable: null }),
+  openBulkAlter: (bulkAlter) => set({ bulkAlter }),
+  closeAll: () =>
+    set({ bulk: null, maintenance: null, prompt: null, copyTable: null, bulkAlter: null }),
 }));

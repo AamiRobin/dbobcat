@@ -51,6 +51,7 @@ fn parse(url: &str) -> ResolvedConnectionConfig {
     };
 
     ResolvedConnectionConfig {
+        ssl_files: None,
         engine,
         host: host.to_string(),
         port,

@@ -86,6 +86,15 @@ export async function fetchVariables(connId: number): Promise<ServerVariable[]> 
   return ipc<ServerVariable[]>("variables_list", { connId });
 }
 
+/** Apply `SET GLOBAL name = value` (MySQL/MariaDB). */
+export async function setServerVariable(
+  connId: number,
+  name: string,
+  value: string,
+): Promise<void> {
+  return ipc<void>("server_set_variable", { connId, name, value });
+}
+
 export async function fetchStatus(connId: number): Promise<StatusVariable[]> {
   return ipc<StatusVariable[]>("status_list", { connId });
 }

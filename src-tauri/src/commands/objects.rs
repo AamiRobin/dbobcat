@@ -456,9 +456,105 @@ pub async fn obj_truncate_tables(
     Ok(results)
 }
 
+
+/// One table's bulk-alter request (HeidiSQL "bulk table editor" parity):
+/// move to another database and/or change engine/charset/collation.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkAlterRequest {
+    pub table: String,
+    /// Move the table to another database (None = keep current).
+    pub new_db: Option<String>,
+    pub engine: Option<String>,
+    pub charset: Option<String>,
+    pub collation: Option<String>,
+}
+
+/// Generate the statements for one bulk-alter request. MySQL/MariaDB only —
+/// the other engines have no per-table engine/charset concept and move
+/// tables across schemas differently.
+fn bulk_alter_sql(dialect: SqlDialect, db: &str, req: &BulkAlterRequest) -> Result<Vec<String>> {
+    match dialect {
+        SqlDialect::Mysql => {
+            let mut stmts = Vec::new();
+            let target_db = req.new_db.as_deref().unwrap_or(db);
+            if req.new_db.as_deref().is_some_and(|d| d != db) {
+                stmts.push(format!(
+                    "RENAME TABLE {} TO {}",
+                    crate::connections::quote_qualified(&[db, &req.table]),
+                    crate::connections::quote_qualified(&[target_db, &req.table]),
+                ));
+            }
+            let mut parts = Vec::new();
+            if let Some(engine) = &req.engine {
+                parts.push(format!("ENGINE={engine}"));
+            }
+            if let Some(charset) = &req.charset {
+                parts.push(format!("DEFAULT CHARSET={charset}"));
+            }
+            if let Some(collation) = &req.collation {
+                parts.push(format!("COLLATE={collation}"));
+            }
+            if !parts.is_empty() {
+                stmts.push(format!(
+                    "ALTER TABLE {} {}",
+                    crate::connections::quote_qualified(&[target_db, &req.table]),
+                    parts.join(", ")
+                ));
+            }
+            if stmts.is_empty() {
+                return Err(AppError::Config("nothing to change".into()));
+            }
+            Ok(stmts)
+        }
+        SqlDialect::Postgres | SqlDialect::Sqlite => Err(AppError::Config(
+            "bulk table alter (move/engine/charset) is a MySQL/MariaDB feature".into(),
+        )),
+    }
+}
+
+/// Apply the bulk table editor: per-table statements run one script per table
+/// so a partial failure is visible per row, mirroring `obj_truncate_tables`.
+#[tauri::command]
+pub async fn obj_bulk_alter_tables(
+    connections: State<'_, ConnectionManager>,
+    conn_id: u32,
+    db: String,
+    requests: Vec<BulkAlterRequest>,
+) -> Result<Vec<ObjectOpResult>> {
+    let dialect = connections.server_info(conn_id).await?.dialect;
+    let mut results = Vec::with_capacity(requests.len());
+    for req in requests {
+        let name = req.table.clone();
+        let stmts = match bulk_alter_sql(dialect, &db, &req) {
+            Ok(stmts) => stmts,
+            Err(e) => {
+                results.push(ObjectOpResult {
+                    name,
+                    ok: false,
+                    error: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
+        let joined = stmts.join(";\n");
+        let outcomes = connections.run_script(conn_id, joined, true).await?;
+        match first_error_message(&outcomes) {
+            Some(error) => results.push(ObjectOpResult {
+                name,
+                ok: false,
+                error: Some(error),
+            }),
+            None => results.push(ObjectOpResult { name, ok: true, error: None }),
+        }
+    }
+    Ok(results)
+}
+
 // ---------------------------------------------------------------------------
 // Views / routines / triggers / events
 // ---------------------------------------------------------------------------
+
 
 #[tauri::command]
 pub async fn obj_list_routines(
@@ -574,4 +670,99 @@ pub async fn obj_maintenance(
         });
     }
     Ok(results)
+}
+
+#[cfg(test)]
+mod bulk_alter_tests {
+    use super::*;
+
+    #[test]
+    fn engine_only_produces_single_alter() {
+        let req = BulkAlterRequest {
+            table: "orders".into(),
+            new_db: None,
+            engine: Some("InnoDB".into()),
+            charset: None,
+            collation: None,
+        };
+        let stmts = bulk_alter_sql(SqlDialect::Mysql, "shop", &req).unwrap();
+        assert_eq!(stmts, vec!["ALTER TABLE `shop`.`orders` ENGINE=InnoDB"]);
+    }
+
+    #[test]
+    fn charset_and_collation_combine_into_one_statement() {
+        let req = BulkAlterRequest {
+            table: "orders".into(),
+            new_db: None,
+            engine: None,
+            charset: Some("utf8mb4".into()),
+            collation: Some("utf8mb4_0900_ai_ci".into()),
+        };
+        let stmts = bulk_alter_sql(SqlDialect::Mysql, "shop", &req).unwrap();
+        assert_eq!(
+            stmts,
+            vec!["ALTER TABLE `shop`.`orders` DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_0900_ai_ci"]
+        );
+    }
+
+    #[test]
+    fn move_renames_first_then_alters_at_target() {
+        let req = BulkAlterRequest {
+            table: "orders".into(),
+            new_db: Some("archive".into()),
+            engine: Some("MyISAM".into()),
+            charset: None,
+            collation: None,
+        };
+        let stmts = bulk_alter_sql(SqlDialect::Mysql, "shop", &req).unwrap();
+        assert_eq!(
+            stmts,
+            vec![
+                "RENAME TABLE `shop`.`orders` TO `archive`.`orders`",
+                "ALTER TABLE `archive`.`orders` ENGINE=MyISAM",
+            ]
+        );
+    }
+
+    #[test]
+    fn same_db_move_is_not_a_rename() {
+        let req = BulkAlterRequest {
+            table: "orders".into(),
+            new_db: Some("shop".into()),
+            engine: Some("InnoDB".into()),
+            charset: None,
+            collation: None,
+        };
+        let stmts = bulk_alter_sql(SqlDialect::Mysql, "shop", &req).unwrap();
+        assert_eq!(stmts.len(), 1);
+        assert!(stmts[0].starts_with("ALTER TABLE"));
+    }
+
+    #[test]
+    fn empty_request_is_an_error() {
+        let req = BulkAlterRequest {
+            table: "orders".into(),
+            new_db: None,
+            engine: None,
+            charset: None,
+            collation: None,
+        };
+        let err = bulk_alter_sql(SqlDialect::Mysql, "shop", &req).unwrap_err();
+        assert!(err.to_string().contains("nothing to change"));
+    }
+
+    #[test]
+    fn non_mysql_dialects_are_rejected() {
+        let req = BulkAlterRequest {
+            table: "orders".into(),
+            new_db: Some("archive".into()),
+            engine: Some("InnoDB".into()),
+            charset: None,
+            collation: None,
+        };
+        for dialect in [SqlDialect::Postgres, SqlDialect::Sqlite] {
+            let err = bulk_alter_sql(dialect, "shop", &req).unwrap_err();
+            assert!(err.to_string().contains("MySQL/MariaDB"));
+        }
+    }
 }

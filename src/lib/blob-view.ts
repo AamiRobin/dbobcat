@@ -76,3 +76,29 @@ export function bytesToDataUrl(bytes: number[], mime: string): string {
   }
   return `data:${mime};base64,${btoa(binary)}`;
 }
+
+// ---------------------------------------------------------------------------
+// Base64 transfer (BLOB load/save to file — mirrors the Rust `blob_*` commands)
+// ---------------------------------------------------------------------------
+
+/**
+ * Encode bytes as base64 (chunked to avoid call-stack limits on large BLOBs).
+ * The Rust side decodes with the standard alphabet.
+ */
+export function bytesToBase64(bytes: number[] | Uint8Array): string {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < b.length; i += chunk) {
+    binary += String.fromCharCode(...b.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/** Decode base64 into bytes; shared inverse of [`bytesToBase64`]. */
+export function base64ToBytes(dataB64: string): number[] {
+  const binary = atob(dataB64.trim());
+  const out = new Array<number>(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}

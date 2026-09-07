@@ -64,6 +64,28 @@ export function applyTheme(theme: Theme): void {
   }
 }
 
+/**
+ * Cross-fade surface colors while the `.dark` class flips: a temporary
+ * `theme-fade` class on <html> enables background/border/text transitions for
+ * one toggle (see index.css). Only added when the theme actually changes, so
+ * first paint stays instant; skipped under reduced motion.
+ */
+let themeFadeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function fadeThemeFlip(theme: Theme): void {
+  const root = document.documentElement;
+  if (root.classList.contains("dark") === (theme === "dark")) return;
+  try {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  } catch {
+    // matchMedia unavailable — fall through to instant switch
+    return;
+  }
+  root.classList.add("theme-fade");
+  if (themeFadeTimer) clearTimeout(themeFadeTimer);
+  themeFadeTimer = setTimeout(() => root.classList.remove("theme-fade"), 220);
+}
+
 export const useUiStore = create<UiState>((set, get) => ({
   theme: loadInitialTheme(),
   lang: "en",
@@ -83,6 +105,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     // Commit store state first so subscribers observe the new value in the
     // same tick; DOM/localStorage application follows as a pure side effect.
     set({ theme });
+    fadeThemeFlip(theme);
     applyTheme(theme);
   },
 

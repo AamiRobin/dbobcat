@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Folder, PlugZap, Plus, Save, Server, Trash2 } from "lucide-react";
+import {
+  ChevronRight,
+  FileDown,
+  FileUp,
+  Folder,
+  PlugZap,
+  Plus,
+  Save,
+  Server,
+  Trash2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,13 +22,20 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { ipc } from "@/lib/ipc";
 import { t } from "@/lib/i18n";
 import { notify } from "@/lib/toast";
-import { buildSessionTree, existingGroupPaths, sessionColor, type SessionGroupNode } from "@/lib/session-groups";
+import { buildSessionTree, existingGroupPaths, parseGroupPath, sessionColor, type SessionGroupNode } from "@/lib/session-groups";
+import { pickOpenPath, pickSavePath } from "@/lib/export-queries";
 import { useConnectionStore } from "@/stores/connection";
-import type { SavedSession, TestResult } from "@/types/ipc";
+import type {
+  SavedSession,
+  SettingsExportSummary,
+  SettingsImportSummary,
+  TestResult,
+} from "@/types/ipc";
 
 import { SessionForm } from "./SessionForm";
 import {
@@ -49,31 +66,68 @@ type SavePayload = {
   sshPassword?: string;
 };
 
+/** DnD payload marker so only session-row drags can trigger a regroup. */
+const SESSION_DRAG_MIME = "application/x-murmeli-session";
+
+/**
+ * Shared dragover/drop wiring for tree drop targets; `newGroup` "" is the
+ * root. Guarded on the session MIME so table/OS drags never activate it.
+ */
+function sessionDropHandlers(
+  onRegroup: (id: string, newGroup: string) => void,
+  newGroup: string,
+  setOver: (over: boolean) => void,
+) {
+  return {
+    onDragOver: (e: DragEvent<HTMLElement>) => {
+      if (!e.dataTransfer.types.includes(SESSION_DRAG_MIME)) return;
+      e.preventDefault();
+      setOver(true);
+    },
+    onDragLeave: (e: DragEvent<HTMLElement>) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
+    },
+    onDrop: (e: DragEvent<HTMLElement>) => {
+      if (!e.dataTransfer.types.includes(SESSION_DRAG_MIME)) return;
+      e.preventDefault();
+      setOver(false);
+      const id = e.dataTransfer.getData(SESSION_DRAG_MIME);
+      if (id) onRegroup(id, newGroup);
+    },
+  };
+}
+
 /** Collapsible grouped tree of sessions (Phase 9-B). */
 function SessionTreeList({
   root,
   selectedId,
   onSelect,
+  onRegroup,
   collapsed,
   toggleCollapsed,
 }: {
   root: SessionGroupNode;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  onRegroup: (id: string, newGroup: string) => void;
   collapsed: Set<string>;
   toggleCollapsed: (path: string) => void;
 }) {
+  const [rootOver, setRootOver] = useState(false);
   return (
     <div className="flex flex-col gap-0.5">
-      {/* Root node: "All sessions" — selects the unsaved new-draft state. */}
+      {/* Root node: "All sessions" — selects the unsaved new-draft state.
+          Dropping a session row here moves it out of any group. */}
       <button
         type="button"
         onClick={() => onSelect(null)}
+        {...sessionDropHandlers(onRegroup, "", setRootOver)}
         className={cn(
           "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs",
           selectedId === null
             ? "bg-accent text-accent-foreground"
             : "hover:bg-accent/50",
+          rootOver && "ring-1 ring-primary/40 bg-primary/5",
         )}
       >
         <Server className="size-3.5 shrink-0 text-muted-foreground" />
@@ -90,6 +144,7 @@ function SessionTreeList({
           depth={0}
           selectedId={selectedId}
           onSelect={onSelect}
+          onRegroup={onRegroup}
           collapsed={collapsed}
           toggleCollapsed={toggleCollapsed}
         />
@@ -113,6 +168,7 @@ function GroupNode({
   depth,
   selectedId,
   onSelect,
+  onRegroup,
   collapsed,
   toggleCollapsed,
 }: {
@@ -120,17 +176,21 @@ function GroupNode({
   depth: number;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  onRegroup: (id: string, newGroup: string) => void;
   collapsed: Set<string>;
   toggleCollapsed: (path: string) => void;
 }) {
   const open = !collapsed.has(group.path);
+  const [over, setOver] = useState(false);
   return (
     <li>
       <button
         type="button"
         onClick={() => toggleCollapsed(group.path)}
+        {...sessionDropHandlers(onRegroup, group.path, setOver)}
         className={cn(
           "flex w-full items-center gap-1 rounded-md px-1 py-1 text-left text-xs hover:bg-accent/50",
+          over && "ring-1 ring-primary/40 bg-primary/5",
         )}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
         aria-expanded={open}
@@ -151,6 +211,7 @@ function GroupNode({
               depth={depth + 1}
               selectedId={selectedId}
               onSelect={onSelect}
+              onRegroup={onRegroup}
               collapsed={collapsed}
               toggleCollapsed={toggleCollapsed}
             />
@@ -185,6 +246,11 @@ function SessionRow({
   return (
     <button
       type="button"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(SESSION_DRAG_MIME, session.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
       onClick={() => onSelect(session.id)}
       style={{ paddingLeft: `${depth * 12 + 4}px` }}
       className={cn(
@@ -235,6 +301,8 @@ export function SessionManagerDialog({
   const [formError, setFormError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
   /** Collapsed group paths (full slash paths) in the left tree. */
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
@@ -271,6 +339,49 @@ export function SessionManagerDialog({
   }, [open, initialSelectedId, list, selectedId]);
 
   const invalidateSessions = () => queryClient.invalidateQueries({ queryKey: ["sessions"] });
+
+  // Settings transfer (HeidiSQL "settings file" parity): sessions + UI
+  // settings travel as one JSON file; passwords never leave the encrypted
+  // local credential store.
+  const exportSettings = async () => {
+    try {
+      setExporting(true);
+      const path = await pickSavePath("murmeli-settings.json", [
+        { name: "Murmeli settings", extensions: ["json"] },
+      ]);
+      if (!path) return;
+      const summary = await ipc<SettingsExportSummary>("settings_export_to_file", { path });
+      notify.success(
+        `Exported ${summary.sessions} session(s) · ${summary.keys} key(s). Passwords are not included.`,
+      );
+    } catch (err) {
+      notify.error(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const importSettings = async () => {
+    try {
+      setImporting(true);
+      const path = await pickOpenPath([
+        { name: "Murmeli settings", extensions: ["json"] },
+      ]);
+      if (!path) return;
+      const summary = await ipc<SettingsImportSummary>("settings_import_from_file", {
+        path,
+        replaceSessions: false,
+      });
+      notify.success(
+        `Imported ${summary.keysImported} key(s): ${summary.sessionsAdded} session(s) added, ${summary.sessionsUpdated} updated.`,
+      );
+      await invalidateSessions();
+    } catch (err) {
+      notify.error(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const saveMutation = useMutation({
     mutationFn: async (payload: SavePayload) => {
@@ -327,6 +438,19 @@ export function SessionManagerDialog({
     testMutation.mutate(payload);
   }
 
+  /** Drop-regroup: re-save the dragged session under `newGroup` ("" = root). */
+  function handleRegroup(sessionId: string, newGroup: string) {
+    const session = list.find((s) => s.id === sessionId);
+    if (!session) return;
+    // Compare normalized paths so dropping onto the session's own folder
+    // ("Work/Prod" vs " Work / Prod ") is a no-op.
+    if (parseGroupPath(session.group).join("/") === newGroup) return;
+    selectSession(sessionId);
+    // No password args: the backend keeps stored credentials. "" → null
+    // matches draftToSession's stored-group convention.
+    saveMutation.mutate({ session: { ...session, group: newGroup === "" ? null : newGroup } });
+  }
+
   /** Connect always persists first so the backend can resolve secrets by id. */
   async function handleConnect() {
     const payload = buildPayload();
@@ -370,9 +494,45 @@ export function SessionManagerDialog({
           <div className="flex min-h-0 flex-col border-r">
             <div className="flex items-center justify-between px-2 py-1.5">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("session.list")}</span>
-              <Button variant="ghost" size="icon-xs" aria-label={t("session.new")} onClick={() => selectSession(null)}>
-                <Plus />
-              </Button>
+              <span className="flex items-center gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label="Import settings file"
+                      disabled={importing}
+                      onClick={() => void importSettings()}
+                    >
+                      {importing ? <Spinner className="size-3.5" /> : <FileUp />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Import sessions/settings from a JSON file
+                    (passwords not included)
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label="Export settings file"
+                      disabled={exporting}
+                      onClick={() => void exportSettings()}
+                    >
+                      {exporting ? <Spinner className="size-3.5" /> : <FileDown />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Export sessions/settings to a JSON file
+                    (passwords not included)
+                  </TooltipContent>
+                </Tooltip>
+                <Button variant="ghost" size="icon-xs" aria-label={t("session.new")} onClick={() => selectSession(null)}>
+                  <Plus />
+                </Button>
+              </span>
             </div>
             <ScrollArea className="min-h-0 flex-1 px-1 pb-2">
               {sessions.isPending && (
@@ -385,6 +545,7 @@ export function SessionManagerDialog({
                   root={buildSessionTree(list)}
                   selectedId={selectedId}
                   onSelect={selectSession}
+                  onRegroup={handleRegroup}
                   collapsed={collapsedGroups}
                   toggleCollapsed={(path) =>
                     setCollapsedGroups((prev) => {

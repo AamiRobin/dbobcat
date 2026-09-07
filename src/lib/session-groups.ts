@@ -73,6 +73,25 @@ function sortGroups(groups: SessionGroupNode[]): void {
   for (const g of groups) sortGroups(g.groups);
 }
 
+/**
+ * Move session `id` into `newGroup` ("" = ungrouped). Returns a new array
+ * whose other entries are reference-identical to the input's; a nullish
+ * stored group counts as "" and an unknown id / unchanged group returns the
+ * input array as-is.
+ */
+export function regroupSessions(
+  sessions: SavedSession[],
+  id: string,
+  newGroup: string,
+): SavedSession[] {
+  const index = sessions.findIndex((s) => s.id === id);
+  if (index === -1) return sessions;
+  if ((sessions[index].group ?? "") === newGroup) return sessions;
+  const next = [...sessions];
+  next[index] = { ...sessions[index], group: newGroup };
+  return next;
+}
+
 /** Every distinct non-empty group path currently in use (form datalist). */
 export function existingGroupPaths(sessions: SavedSession[]): string[] {
   const paths = new Set<string>();

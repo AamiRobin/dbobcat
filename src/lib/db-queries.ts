@@ -1,3 +1,4 @@
+import { bytesToBase64 } from "@/lib/blob-view";
 import { ipc } from "@/lib/ipc";
 import type {
   ApplyChangesRequest,
@@ -151,4 +152,18 @@ export async function fetchFkRefValues(
 /** Read the system clipboard as plain text (paste rows / quick filters). */
 export function readClipboardText(): Promise<string> {
   return ipc<string>("clipboard_read_text");
+}
+
+// ---------------------------------------------------------------------------
+// BLOB file transfer (HeidiSQL-style "Save to file…" / "Load from file…")
+// ---------------------------------------------------------------------------
+
+/** Write a binary payload (base64 on the wire) to a user-picked path. */
+export function writeBlobFile(path: string, bytes: number[] | Uint8Array): Promise<number> {
+  return ipc<number>("blob_write_file", { path, dataB64: bytesToBase64(bytes) });
+}
+
+/** Read a file's bytes (returned base64-encoded) for staging into a cell. */
+export function readBlobFile(path: string): Promise<string> {
+  return ipc<string>("blob_read_file", { path });
 }

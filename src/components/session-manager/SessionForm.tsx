@@ -1,4 +1,11 @@
-import { Database, DatabaseZap, File, PlugZap, Upload } from "lucide-react";
+import {
+  Database,
+  DatabaseZap,
+  File,
+  FolderOpen,
+  PlugZap,
+  Upload,
+} from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -23,6 +30,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ipc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/i18n";
+import { pickOpenPath } from "@/lib/export-queries";
 import { SESSION_COLORS } from "@/lib/session-groups";
 import type { IsolationLevel, DbType, TestResult } from "@/types/ipc";
 
@@ -257,6 +265,45 @@ export function SessionForm({
                     {t("session.form.ssl.required")}
                   </ToggleGroupItem>
                 </ToggleGroup>
+                {draft.sslMode !== "disabled" && (
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        ["sslCertPath", "Client cert (.pem)"],
+                        ["sslKeyPath", "Client key (.pem)"],
+                        ["sslCaPath", "CA cert (.pem)"],
+                      ] as const
+                    ).map(([field, label]) => (
+                      <Field key={field} className="gap-1">
+                        <FieldLabel className="text-[10px] text-muted-foreground">
+                          {label}
+                        </FieldLabel>
+                        <div className="flex items-center gap-1">
+                          <Input
+                            value={draft[field]}
+                            onChange={(e) => patch({ [field]: e.target.value })}
+                            className="h-7 font-mono text-[11px]"
+                            aria-label={label}
+                          />
+                          <Button
+                            variant="outline"
+                            size="icon-xs"
+                            aria-label={`Browse ${label}`}
+                            onClick={async () => {
+                              const path = await pickOpenPath([
+                                { name: "PEM certificates/keys", extensions: ["pem", "crt", "key", "cer"] },
+                                { name: "All files", extensions: ["*"] },
+                              ]);
+                              if (path) patch({ [field]: path });
+                            }}
+                          >
+                            <FolderOpen className="size-3.5" />
+                          </Button>
+                        </div>
+                      </Field>
+                    ))}
+                  </div>
+                )}
               </Field>
             </div>
 

@@ -1,5 +1,5 @@
 import { ipc } from "@/lib/ipc";
-import type { HistoryEntry, QueryOutcome } from "@/types/ipc";
+import type { ExplainStatement, HistoryEntry, QueryOutcome } from "@/types/ipc";
 
 /**
  * Query-editor server state (Phase 3): script execution + history.
@@ -25,6 +25,18 @@ export async function runScript(
     stopOnError,
     connName,
   });
+}
+
+/**
+ * EXPLAIN every statement of the script (dialect-aware; `analyze` runs
+ * EXPLAIN ANALYZE where the engine supports it).
+ */
+export async function explainScript(
+  connId: number,
+  sql: string,
+  analyze: boolean,
+): Promise<ExplainStatement[]> {
+  return ipc<ExplainStatement[]>("query_explain", { connId, sql, analyze });
 }
 
 export async function fetchHistory(): Promise<HistoryEntry[]> {

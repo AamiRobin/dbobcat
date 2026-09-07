@@ -110,7 +110,7 @@ export function NoTabsPlaceholder() {
   // Heidi-style empty state: until a session is live, invite connecting.
   if (!connected) {
     return (
-      <Empty className="h-full select-none">
+      <Empty className="h-full animate-fade-rise select-none">
         <EmptyHeader>
           <EmptyMedia>
             <Cable className="size-10 text-muted-foreground/40" strokeWidth={1.5} />

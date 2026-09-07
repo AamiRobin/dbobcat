@@ -15,7 +15,10 @@ function Separator({
       decorative={decorative}
       orientation={orientation}
       className={cn(
-        "shrink-0 bg-border data-horizontal:h-px data-horizontal:w-full data-vertical:w-px data-vertical:self-stretch",
+        // No `self-stretch` here: with an explicit height (every caller sets
+        // one) flexbox resolves stretch to flex-start, pinning the divider to
+        // the top of the bar. Rely on the parent's items-center instead.
+        "shrink-0 bg-border data-horizontal:h-px data-horizontal:w-full data-vertical:w-px",
         className
       )}
       {...props}

@@ -154,3 +154,80 @@
     @apply font-sans;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Micro-animations. Opacity/transform only, so they compose with the
+ * virtualized grid and never trigger layout. Durations sit in the 140–220ms
+ * desktop-app range: noticeable, never in the way.
+ * ------------------------------------------------------------------------ */
+
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tab-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes badge-pop {
+  0% {
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@utility animate-fade-rise {
+  animation: fade-rise 160ms ease-out both;
+}
+
+@utility animate-tab-in {
+  animation: tab-in 140ms ease-out both;
+}
+
+@utility animate-badge-pop {
+  animation: badge-pop 220ms ease-out both;
+}
+
+/* Smooth theme flip: a temporary class on <html> while the `.dark` toggle
+ * lands, so surface colors cross-fade instead of snapping. */
+html.theme-fade,
+html.theme-fade *,
+html.theme-fade *::before,
+html.theme-fade *::after {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    fill 180ms ease,
+    stroke 180ms ease !important;
+}
+
+/* Accessibility escape hatch: decorative movement collapses to nothing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

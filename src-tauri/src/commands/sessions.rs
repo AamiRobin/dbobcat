@@ -7,7 +7,9 @@
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
+use tauri::async_runtime::spawn_blocking;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_store::StoreExt;
 
 
 use crate::connections::manager::{
@@ -45,6 +47,9 @@ pub struct SavedSession {
     pub use_ssh: bool,
     #[serde(default)]
     pub ssh: Option<SshTunnelConfig>,
+    /// TLS identity/trust files (HeidiSSL parity; server engines only).
+    #[serde(default)]
+    pub ssl: Option<crate::connections::SslFiles>,
     // Phase 9-B organization + resilience metadata (all optional for
     // backward compatibility with existing settings.json files).
     /// Slash-separated folder path, e.g. "Work/Prod".
@@ -156,6 +161,7 @@ fn resolve_config(
             password: None,
             database: Some(crate::connections::sqlite::SqliteConnection::database_name(&session.host)),
             ssl_mode: SslMode::Disabled,
+            ssl_files: None,
             ssh: None,
         });
     }
@@ -200,6 +206,7 @@ fn resolve_config(
         password,
         database: session.database.clone(),
         ssl_mode: session.ssl_mode,
+        ssl_files: session.ssl.clone(),
         ssh,
     })
 }
@@ -412,4 +419,183 @@ pub async fn session_disconnect(
     conn_id: u32,
 ) -> Result<()> {
     connections.disconnect(conn_id, &tunnels).await
+}
+
+// ---------------------------------------------------------------------------
+// Settings export / import (HeidiSQL "settings file" parity)
+//
+// Exports the whole settings.json document (sessions + UI settings) WITHOUT
+// secret material — passwords live only in the encrypted credential store on
+// the originating machine and are never part of the file.
+// ---------------------------------------------------------------------------
+
+/// Pure sessions merge used by `settings_import_from_file` (unit-tested).
+/// Returns the merged list plus (added, updated) counts.
+fn merge_sessions(
+    existing: Vec<serde_json::Value>,
+    incoming: Vec<serde_json::Value>,
+    replace: bool,
+) -> (Vec<serde_json::Value>, usize, usize) {
+    if replace {
+        let n = incoming.len();
+        return (incoming, n, 0);
+    }
+    let mut list = existing;
+    let mut added = 0usize;
+    let mut updated = 0usize;
+    for item in incoming {
+        let id = item.get("id").and_then(|v| v.as_str()).map(String::from);
+        match id {
+            Some(id) => {
+                let pos = list
+                    .iter()
+                    .position(|s| s.get("id").and_then(|v| v.as_str()) == Some(id.as_str()));
+                match pos {
+                    Some(i) => {
+                        list[i] = item;
+                        updated += 1;
+                    }
+                    None => {
+                        list.push(item);
+                        added += 1;
+                    }
+                }
+            }
+            None => {
+                list.push(item);
+                added += 1;
+            }
+        }
+    }
+    (list, added, updated)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsExportSummary {
+    pub keys: usize,
+    pub sessions: usize,
+    pub path: String,
+}
+
+/// Serialize the entire settings document to `path` (pretty JSON).
+#[tauri::command]
+pub async fn settings_export_to_file(
+    app: AppHandle,
+    path: String,
+) -> Result<SettingsExportSummary> {
+    spawn_blocking(move || {
+        let store = app.store(settings::SETTINGS_FILE)?;
+        let mut map = serde_json::Map::new();
+        for (key, value) in store.entries() {
+            map.insert(key.clone(), value.clone());
+        }
+        let keys = map.len();
+        let sessions = map
+            .get(SESSIONS_KEY)
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let doc = serde_json::Value::Object(map);
+        std::fs::write(&path, serde_json::to_vec_pretty(&doc)?)?;
+        Ok(SettingsExportSummary { keys, sessions, path })
+    })
+    .await
+    .map_err(|e| AppError::Db(format!("export task failed: {e}")))?
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsImportSummary {
+    pub keys_imported: usize,
+    pub sessions_added: usize,
+    pub sessions_updated: usize,
+}
+
+/// Import a settings export file. Sessions merge by id (add new, refresh
+/// known) unless `replace_sessions` is true; every other key is imported
+/// verbatim.
+#[tauri::command]
+pub async fn settings_import_from_file(
+    app: AppHandle,
+    path: String,
+    replace_sessions: Option<bool>,
+) -> Result<SettingsImportSummary> {
+    spawn_blocking(move || {
+        let raw = std::fs::read(&path)?;
+        let imported: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&raw)
+            .map_err(|e| {
+                AppError::Config(format!("not a valid Murmeli settings export: {e}"))
+            })?;
+
+        let store = app.store(settings::SETTINGS_FILE)?;
+        let mut summary = SettingsImportSummary {
+            keys_imported: 0,
+            sessions_added: 0,
+            sessions_updated: 0,
+        };
+
+        for (key, value) in imported {
+            if key == SESSIONS_KEY {
+                let incoming = value.as_array().cloned().unwrap_or_default();
+                let replace = replace_sessions.unwrap_or(false);
+                let existing = store
+                    .get(SESSIONS_KEY)
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default();
+                let (merged, added, updated) = merge_sessions(existing, incoming, replace);
+                store.set(SESSIONS_KEY, serde_json::Value::Array(merged));
+                summary.sessions_added = added;
+                summary.sessions_updated = updated;
+            } else {
+                store.set(key.clone(), value);
+            }
+            summary.keys_imported += 1;
+        }
+        store.save()?;
+        Ok(summary)
+    })
+    .await
+    .map_err(|e| AppError::Db(format!("import task failed: {e}")))?
+}
+
+#[cfg(test)]
+mod settings_transfer_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn merge_adds_new_and_updates_known_by_id() {
+        let existing = vec![json!({"id": "a", "name": "Old A"}), json!({"id": "b", "name": "B"})];
+        let incoming = vec![
+            json!({"id": "a", "name": "New A"}),
+            json!({"id": "c", "name": "C"}),
+        ];
+        let (merged, added, updated) = merge_sessions(existing, incoming, false);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(added, 1);
+        assert_eq!(updated, 1);
+        assert_eq!(merged[0], json!({"id": "a", "name": "New A"}));
+        assert_eq!(merged[1], json!({"id": "b", "name": "B"}));
+        assert_eq!(merged[2], json!({"id": "c", "name": "C"}));
+    }
+
+    #[test]
+    fn merge_replace_swaps_whole_list() {
+        let existing = vec![json!({"id": "a"})];
+        let incoming = vec![json!({"id": "x"}), json!({"id": "y"})];
+        let (merged, added, updated) = merge_sessions(existing, incoming, true);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(added, 2);
+        assert_eq!(updated, 0);
+    }
+
+    #[test]
+    fn merge_keeps_entries_without_ids() {
+        let incoming = vec![json!({"name": "no id here"})];
+        let (merged, added, updated) = merge_sessions(Vec::new(), incoming, false);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(added, 1);
+        assert_eq!(updated, 0);
+    }
 }

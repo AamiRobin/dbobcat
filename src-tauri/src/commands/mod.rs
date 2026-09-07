@@ -11,6 +11,7 @@
 //! inside `generate_handler!` (tauri-apps/tauri#4919).
 
 pub mod app;
+pub mod blob;
 pub mod data;
 pub mod diagram;
 pub mod export;
@@ -46,6 +47,8 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         sessions::session_save,
         sessions::session_delete,
         sessions::session_test,
+        sessions::settings_export_to_file,
+        sessions::settings_import_from_file,
         sessions::session_connect,
         sessions::session_disconnect,
         // transaction ledger (Transactions UI Phase 1)
@@ -64,8 +67,11 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         data::data_count_rows,
         data::data_distinct_values,
         data::data_fk_ref_values,
+        blob::blob_write_file,
+        blob::blob_read_file,
         // query editor
         query::query_run_script,
+        query::query_explain,
         query::query_history_list,
         query::query_history_clear,
         // SQL snippets (Phase 9-B helpers panel)
@@ -84,6 +90,7 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         objects::obj_empty_clone_table,
         objects::obj_copy_table,
         objects::obj_truncate_tables,
+        objects::obj_bulk_alter_tables,
         objects::obj_list_routines,
         objects::obj_get_routine_ddl,
         objects::obj_list_triggers,
@@ -113,6 +120,7 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         server::process_list,
         server::process_kill,
         server::variables_list,
+        server::server_set_variable,
         server::status_list,
         server::find_text_start,
         server::find_text_cancel,

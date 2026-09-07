@@ -1,6 +1,7 @@
 import { ipc } from "@/lib/ipc";
 import type {
   AlterResult,
+  BulkAlterRequest,
   CreateTableRequest,
   DropObjectRequest,
   EventMeta,
@@ -217,6 +218,18 @@ export function truncateTables(
   names: string[],
 ): Promise<ObjectOpResult[]> {
   return ipc<ObjectOpResult[]>("obj_truncate_tables", { connId, db, names });
+}
+
+/**
+ * Bulk table editor (MySQL/MariaDB): move tables to another database and/or
+ * change engine/charset/collation across many tables in one pass.
+ */
+export function bulkAlterTables(
+  connId: number,
+  db: string,
+  requests: BulkAlterRequest[],
+): Promise<ObjectOpResult[]> {
+  return ipc<ObjectOpResult[]>("obj_bulk_alter_tables", { connId, db, requests });
 }
 
 export function runMaintenance(

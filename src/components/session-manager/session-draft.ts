@@ -12,6 +12,9 @@ export interface SessionDraft {
   database: string; // "" → null
   sslMode: SslMode;
   useSsh: boolean;
+  sslCaPath: string;
+  sslCertPath: string;
+  sslKeyPath: string;
   sshHost: string;
   sshPort: number;
   sshUser: string;
@@ -67,6 +70,9 @@ export function newDraft(engine: DbType = "mysql"): SessionDraft {
     ...ENGINE_DEFAULTS[engine],
     database: "",
     sslMode: engine === "sqlite" ? "disabled" : "preferred",
+    sslCaPath: "",
+    sslCertPath: "",
+    sslKeyPath: "",
     useSsh: false,
     sshHost: "",
     sshPort: 22,
@@ -97,6 +103,9 @@ export function draftWithEngine(draft: SessionDraft, engine: DbType): SessionDra
     port: defaults.port,
     user: defaults.user,
     sslMode: engine === "sqlite" ? "disabled" : "preferred",
+    sslCaPath: "",
+    sslCertPath: "",
+    sslKeyPath: "",
     useSsh: engine === "sqlite" ? false : draft.useSsh,
   };
 }
@@ -112,6 +121,9 @@ export function draftFromSession(session: SavedSession): SessionDraft {
     database: session.database ?? "",
     sslMode: session.sslMode,
     useSsh: session.useSsh,
+    sslCaPath: session.ssl?.caPath ?? "",
+    sslCertPath: session.ssl?.certPath ?? "",
+    sslKeyPath: session.ssl?.keyPath ?? "",
     sshHost: session.ssh?.host ?? "",
     sshPort: session.ssh?.port ?? 22,
     sshUser: session.ssh?.user ?? "",
@@ -144,6 +156,15 @@ export function draftToSession(draft: SessionDraft): SavedSession {
     database: draft.database.trim() === "" ? null : draft.database.trim(),
     sslMode: sqlite ? "disabled" : draft.sslMode,
     useSsh: !sqlite && draft.useSsh,
+    ssl:
+      !sqlite &&
+      (draft.sslCaPath.trim() || draft.sslCertPath.trim() || draft.sslKeyPath.trim())
+        ? {
+            caPath: draft.sslCaPath.trim() || null,
+            certPath: draft.sslCertPath.trim() || null,
+            keyPath: draft.sslKeyPath.trim() || null,
+          }
+        : null,
     ssh: !sqlite && draft.useSsh
       ? {
           host: draft.sshHost.trim(),

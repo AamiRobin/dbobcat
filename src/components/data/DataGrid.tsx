@@ -41,9 +41,15 @@ import {
   cellDisplayText,
   cellRawText,
   formatByteSize,
+  inputValueToTemporal,
   isNumericType,
   isTemporalType,
+  joinSetValues,
+  parseEnumSetValues,
+  temporalKind,
+  temporalToInputValue,
   type GridColumn,
+  type TemporalKind,
 } from "@/lib/grid-columns";
 import {
   updateKey,
@@ -114,6 +120,24 @@ export interface DataGridProps {
   readOnly?: boolean;
   /** Overlay text for an empty grid (defaults to table wording). */
   emptyLabel?: string;
+  /**
+   * Column names hidden from DISPLAY (persisted per table). Changeset keys,
+   * row lookups and FK jumps stay in full-column index space, so hiding is
+   * purely visual and pending edits keep their meaning.
+   */
+  hiddenColumns?: ReadonlySet<string>;
+  /** When set, scrolls the virtualized body to this real-row index. */
+  scrollToRow?: { rowIndex: number; nonce: number } | null;
+  /** Ctrl+F inside the grid opens the owner's find bar. */
+  onOpenFind?: () => void;
+  /**
+   * Display-order columns (reordered via header drag & drop). Each entry's
+   * changeset index is resolved by name against `columns`, so staged edits
+   * survive reordering.
+   */
+  displayColumns?: GridColumn[];
+  /** Drag & drop reorder: move `fromName` before `toName`. */
+  onColumnReorder?: (fromName: string, toName: string) => void;
 
   // -- Phase 9-A power gestures (all optional) ------------------------------
   /** Quick filter picked from a cell's context menu. */
@@ -175,7 +199,17 @@ export interface DataGridProps {
   onColumnResize: (columnName: string, width: number) => void;
   /** Persisted once the drag ends. */
   onColumnResizeCommit: (columnName: string, width: number) => void;
-  onViewBlob: (value: Extract<RowValue, { t: "bytes" }>) => void;
+  /** Identifies the cell a BLOB viewer was opened from (staging edits back). */
+  onViewBlob: (
+    value: Extract<RowValue, { t: "bytes" }>,
+    cell: { rowId: string; rowIndex: number; colIndex: number; kind: "real" | "insert" },
+  ) => void;
+
+  // -- optional editing helpers (browsing grids) -----------------------------
+  /** Duplicate one real row into a pre-filled staged insert. */
+  onDuplicateRow?: (rowIndex: number) => void;
+  /** Undo the most recent pending change (Ctrl+Z / context menu). */
+  onUndo?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,10 +224,31 @@ export function DataGrid(props: DataGridProps) {
     selectedIds,
     isLoading,
     readOnly = false,
+    hiddenColumns,
+    displayColumns,
+    onColumnReorder,
   } = props;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const totalCount = rows.length + inserts.length;
+
+  /**
+   * Display entries with their ORIGINAL column index. Everything typed
+   * (changeset keys, row-cell lookup, FK jumps) stays in full-column space;
+   * hidden columns only drop out of rendering and reorder is display-only.
+   */
+  const displayEntries = useMemo(() => {
+    const ordered = displayColumns ?? columns;
+    return ordered
+      .map((col) => ({
+        col,
+        originIndex: columns.findIndex((c) => c.meta.name === col.meta.name),
+      }))
+      .filter(
+        ({ col, originIndex }) =>
+          originIndex !== -1 && !hiddenColumns?.has(col.meta.name),
+      );
+  }, [columns, displayColumns, hiddenColumns]);
 
   /** Fresh selection for keyboard shortcuts without rebuilding the handler. */
   const selectedIdsRef = useRef(selectedIds);
@@ -205,9 +260,15 @@ export function DataGrid(props: DataGridProps) {
     overscan: 8,
   });
 
+  // Find navigation: bring the requested row into view (centered).
+  useEffect(() => {
+    if (!props.scrollToRow || props.scrollToRow.rowIndex < 0) return;
+    virtualizer.scrollToIndex(props.scrollToRow.rowIndex, { align: "center" });
+  }, [props.scrollToRow, virtualizer]);
+
   const totalWidth = useMemo(
-    () => columns.reduce((sum, c) => sum + c.width, 0),
-    [columns],
+    () => displayEntries.reduce((sum, e) => sum + e.col.width, 0),
+    [displayEntries],
   );
 
   /** Column names in display order — FK jumps map cells through it. */
@@ -249,6 +310,18 @@ export function DataGrid(props: DataGridProps) {
         // Paste rows only outside cell editing; editors keep native paste.
         e.preventDefault();
         props.onPasteRows();
+        return;
+      }
+      // Ctrl+Z: undo the most recent pending grid change (changeset-level).
+      if (mod && e.key.toLowerCase() === "z" && !readOnly) {
+        e.preventDefault();
+        props.onUndo?.();
+        return;
+      }
+      // Ctrl+F: open the grid find bar.
+      if (mod && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        props.onOpenFind?.();
         return;
       }
       // Read-only grids keep navigation/copy but drop every editing shortcut.
@@ -337,7 +410,7 @@ export function DataGrid(props: DataGridProps) {
           style={{ height: HEADER_HEIGHT }}
           className="sticky top-0 z-30 flex border-b bg-muted/70 backdrop-blur-[2px]"
         >
-          {columns.map((col, i) => (
+          {displayEntries.map(({ col }, i) => (
             <HeaderCell
               key={col.meta.name}
               column={col}
@@ -351,6 +424,7 @@ export function DataGrid(props: DataGridProps) {
               onSortClick={() => props.onSortClick(col.meta.name)}
               onResizeLive={(w) => props.onColumnResize(col.meta.name, w)}
               onResizeCommit={(w) => props.onColumnResizeCommit(col.meta.name, w)}
+              onColumnDrop={onColumnReorder}
             />
           ))}
         </div>
@@ -361,7 +435,7 @@ export function DataGrid(props: DataGridProps) {
             style={{ height: FILTER_HEIGHT, top: HEADER_HEIGHT }}
             className="sticky z-20 flex border-b bg-background/95 backdrop-blur-[2px]"
           >
-            {columns.map((col) => (
+            {displayEntries.map(({ col }) => (
               <FilterCell
                 key={col.meta.name}
                 column={col}
@@ -388,6 +462,7 @@ export function DataGrid(props: DataGridProps) {
                 rowId={item.id}
                 rowData={props.rows[item.rowIndex] ?? []}
                 columnNames={columnNames}
+                displayEntries={displayEntries}
                 {...props}
               />
             ) : (
@@ -397,6 +472,7 @@ export function DataGrid(props: DataGridProps) {
                 row={item.row}
                 rowId={item.id}
                 columnNames={columnNames}
+                displayEntries={displayEntries}
                 {...props}
               />
             );
@@ -461,6 +537,7 @@ function HeaderCell({
   onSortClick,
   onResizeLive,
   onResizeCommit,
+  onColumnDrop,
 }: {
   column: GridColumn;
   columnIndex: number;
@@ -469,6 +546,8 @@ function HeaderCell({
   onSortClick: () => void;
   onResizeLive: (width: number) => void;
   onResizeCommit: (width: number) => void;
+  /** Present when drag-reorder is enabled (browsing grids). */
+  onColumnDrop?: (fromName: string, toName: string) => void;
 }) {
   const width = column.width;
   const pk = column.meta.key === "PRI";
@@ -506,6 +585,21 @@ function HeaderCell({
   return (
     <div
       style={{ width }}
+      draggable={!!onColumnDrop}
+      onDragStart={(e) => {
+        if (!onColumnDrop) return;
+        e.dataTransfer.setData("text/plain", column.meta.name);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(e) => {
+        if (onColumnDrop) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (!onColumnDrop) return;
+        e.preventDefault();
+        const from = e.dataTransfer.getData("text/plain");
+        if (from && from !== column.meta.name) onColumnDrop(from, column.meta.name);
+      }}
       className="group/hc relative flex shrink-0 flex-col justify-center border-r px-2"
       title={`${column.meta.name} · ${column.meta.dataType}`}
     >
@@ -630,6 +724,8 @@ type RealRowProps = DataGridProps & {
   rowId: string;
   rowData: RowValue[];
   columnNames: string[];
+  /** Visible columns with their original indices (hidden ones filtered out). */
+  displayEntries: Array<{ col: GridColumn; originIndex: number }>;
 };
 
 const RealRow = memo(function RealRow({
@@ -638,11 +734,11 @@ const RealRow = memo(function RealRow({
   rowId,
   rowData,
   columnNames,
+  displayEntries,
   tabId,
   selectedIds,
   focusedCell,
   editingCell,
-  columns,
   readOnly = false,
   ...handlers
 }: RealRowProps) {
@@ -668,22 +764,22 @@ const RealRow = memo(function RealRow({
         deleted && "bg-destructive/10",
       )}
     >
-      {columns.map((col, colIndex) => (
+      {displayEntries.map(({ col, originIndex }) => (
         <GridCell
           key={col.meta.name}
           tabId={tabId}
           column={col}
-          colIndex={colIndex}
+          colIndex={originIndex}
           rowId={rowId}
           rowIndex={rowIndex}
           kind="real"
-          baseValue={rowData[colIndex]}
+          baseValue={rowData[originIndex]}
           rowData={rowData}
           columnNames={columnNames}
           selected={selected}
           deleted={deleted}
-          focused={focusedCol === colIndex}
-          editing={!readOnly && editingCol === colIndex}
+          focused={focusedCol === originIndex}
+          editing={!readOnly && editingCol === originIndex}
           readOnly={readOnly}
           handlers={handlers}
         />
@@ -701,6 +797,8 @@ type InsertRowProps = DataGridProps & {
   row: InsertedRow;
   rowId: string;
   columnNames: string[];
+  /** Visible columns with their original indices (hidden ones filtered out). */
+  displayEntries: Array<{ col: GridColumn; originIndex: number }>;
 };
 
 const InsertRow = memo(function InsertRow({
@@ -708,11 +806,11 @@ const InsertRow = memo(function InsertRow({
   row,
   rowId,
   columnNames,
+  displayEntries,
   tabId,
   selectedIds,
   focusedCell,
   editingCell,
-  columns,
   ...handlers
 }: InsertRowProps) {
   const selected = selectedIds.has(rowId);
@@ -727,12 +825,12 @@ const InsertRow = memo(function InsertRow({
         selected && "bg-success/20",
       )}
     >
-      {columns.map((col, colIndex) => (
+      {displayEntries.map(({ col, originIndex }) => (
         <GridCell
           key={col.meta.name}
           tabId={tabId}
           column={col}
-          colIndex={colIndex}
+          colIndex={originIndex}
           rowId={rowId}
           rowIndex={-1}
           kind="insert"
@@ -740,8 +838,8 @@ const InsertRow = memo(function InsertRow({
           columnNames={columnNames}
           selected={selected}
           deleted={false}
-          focused={focusedCol === colIndex}
-          editing={editingCol === colIndex}
+          focused={focusedCol === originIndex}
+          editing={editingCol === originIndex}
           readOnly={false}
           handlers={handlers}
         />
@@ -757,6 +855,7 @@ const InsertRow = memo(function InsertRow({
 type CellHandlers = Omit<
   DataGridProps,
   | "tabId" | "columns" | "rows" | "inserts" | "selectedIds" | "focusedCell"
+  | "hiddenColumns"
   | "editingCell" | "sortColumn" | "sortDirection" | "filters" | "isLoading"
   | "readOnly" | "emptyLabel"
   | "onSelectAll" | "onClearSelection" | "onCopy"
@@ -800,6 +899,9 @@ function GridCell({
   handlers,
 }: GridCellProps) {
   const { meta } = column;
+  // Typed editors: ENUM/SET dropdowns and native date/time pickers.
+  const enumSetInfo = useMemo(() => parseEnumSetValues(meta.dataType), [meta.dataType]);
+  const temporalEdit = useMemo(() => temporalKind(meta.dataType), [meta.dataType]);
 
   // Targeted subscription: only THIS cell re-renders when its own edit lands.
   const key = updateKey(rowIndex, colIndex);
@@ -821,7 +923,7 @@ function GridCell({
     handlers.onSelectRow(rowId, { ctrl: e.ctrlKey || e.metaKey });
     // Clicking a BLOB cell jumps straight to the binary viewer.
     if (isBytes && value && value.t === "bytes") {
-      handlers.onViewBlob(value);
+      handlers.onViewBlob(value, { rowId, rowIndex, colIndex, kind });
     }
   };
 
@@ -1028,9 +1130,21 @@ function GridCell({
       >
         Copy Cell
       </ContextMenuItem>
+      {!readOnly && handlers.onUndo && (
+        <ContextMenuItem className="text-xs" onClick={() => handlers.onUndo?.()}>
+          Undo Last Change
+        </ContextMenuItem>
+      )}
+      {!readOnly && handlers.onDuplicateRow && kind === "real" && (
+        <ContextMenuItem className="text-xs" onClick={() => handlers.onDuplicateRow?.(rowIndex)}>
+          Duplicate Row
+        </ContextMenuItem>
+      )}
       {copyAsItems()}
       {isBytes && value.t === "bytes" && (
-        <ContextMenuItem onClick={() => handlers.onViewBlob(value)}>
+        <ContextMenuItem
+          onClick={() => handlers.onViewBlob(value, { rowId, rowIndex, colIndex, kind })}
+        >
           View BLOB ({formatByteSize(value.v.length)})
         </ContextMenuItem>
       )}
@@ -1091,7 +1205,7 @@ function GridCell({
             if (readOnly || columnLocked) return;
             // BLOBs open the viewer; text cells enter edit mode.
             if (isBytes && value && value.t === "bytes") {
-              handlers.onViewBlob(value);
+              handlers.onViewBlob(value, { rowId, rowIndex, colIndex, kind });
             } else {
               handlers.onStartEdit({ rowId, colIndex });
             }
@@ -1147,7 +1261,28 @@ function GridCell({
               }
             />
           )}
-          {editing && !(cellFk && handlers.onFkPick && handlers.onLoadFkValues) && (
+          {editing && !(cellFk && handlers.onFkPick && handlers.onLoadFkValues) && enumSetInfo && (
+            <EnumSetEditor
+              kind={enumSetInfo.kind}
+              values={enumSetInfo.values}
+              initialValue={cellRawText(value)}
+              onCommit={(text) =>
+                handlers.onCommitEdit({ rowId, colIndex }, text)
+              }
+              onCancel={handlers.onCancelEdit}
+            />
+          )}
+          {editing && !(cellFk && handlers.onFkPick && handlers.onLoadFkValues) && !enumSetInfo && temporalEdit && (
+            <TemporalEditor
+              kind={temporalEdit}
+              initialValue={cellRawText(value)}
+              onCommit={(text) =>
+                handlers.onCommitEdit({ rowId, colIndex }, text)
+              }
+              onCancel={handlers.onCancelEdit}
+            />
+          )}
+          {editing && !(cellFk && handlers.onFkPick && handlers.onLoadFkValues) && !enumSetInfo && !temporalEdit && (
             <CellEditor
               initialValue={cellRawText(value)}
               onCommit={(text) =>
@@ -1280,6 +1415,18 @@ function CellEditor({
     ref.current?.select();
   }, []);
 
+  /**
+   * Return focus to the grid container when the editor closes via
+   * Enter/Escape — the input unmounts and the browser would otherwise drop
+   * focus to <body>, killing grid keyboard handling until the next click.
+   * (Blur-commit paths must NOT refocus; the click target takes over.)
+   */
+  function refocusGrid(): void {
+    (ref.current?.closest('[role="grid"]') as HTMLElement | null)?.focus({
+      preventScroll: true,
+    });
+  }
+
   return (
     <input
       ref={ref}
@@ -1290,9 +1437,11 @@ function CellEditor({
         e.stopPropagation();
         if (e.key === "Enter") {
           e.preventDefault();
+          refocusGrid();
           onCommit(draft);
         } else if (e.key === "Escape") {
           e.preventDefault();
+          refocusGrid();
           onCancel();
         }
       }}
@@ -1306,6 +1455,132 @@ function CellEditor({
  * for free-text entry; a chevron opens the top-N referenced rows. Picking
  * one routes through `onPick` so multi-column FKs fill every mapped column.
  */
+/**
+ * Typed editor for ENUM (single select) and SET (multi select) columns.
+ * Commits the plain text form; the changeset/backend path parses it like
+ * any other string edit.
+ */
+function EnumSetEditor({
+  kind,
+  values,
+  initialValue,
+  onCommit,
+  onCancel,
+}: {
+  kind: "enum" | "set";
+  values: string[];
+  initialValue: string;
+  onCommit: (rawText: string) => void;
+  onCancel: () => void;
+}) {
+  const ref = useRef<HTMLSelectElement>(null);
+  // For SET the draft holds the selection; for ENUM the select is the state.
+  const [draft, setDraft] = useState<string[]>(() =>
+    initialValue === "" ? [] : initialValue.split(","),
+  );
+
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+
+  function refocusGrid(): void {
+    (ref.current?.closest('[role="grid"]') as HTMLElement | null)?.focus({
+      preventScroll: true,
+    });
+  }
+
+  function commit(): void {
+    refocusGrid();
+    onCommit(kind === "enum" ? (ref.current?.value ?? "") : joinSetValues(draft));
+  }
+
+  return (
+    <div className="absolute inset-0 z-20 flex bg-background outline outline-2 -outline-offset-1 outline-primary">
+      <select
+        ref={ref}
+        multiple={kind === "set"}
+        size={kind === "set" ? Math.min(6, values.length) : undefined}
+        value={kind === "enum" ? initialValue : undefined}
+        defaultValue={kind === "set" ? draft : undefined}
+        onChange={(e) => {
+          if (kind === "enum") return; // value read from the select on commit
+          const opts = Array.from(e.target.selectedOptions).map((o) => o.value);
+          setDraft(opts);
+        }}
+        onBlur={() => commit()}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.preventDefault();
+            refocusGrid();
+            commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            refocusGrid();
+            onCancel();
+          }
+        }}
+        className="h-full min-w-0 flex-1 bg-background px-1 font-mono text-xs outline-none"
+      >
+        {values.map((v) => (
+          <option key={v} value={v}>
+            {v}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/** Native date/time/datetime-local picker for temporal columns. */
+function TemporalEditor({
+  kind,
+  initialValue,
+  onCommit,
+  onCancel,
+}: {
+  kind: TemporalKind;
+  initialValue: string;
+  onCommit: (rawText: string) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(() => temporalToInputValue(kind, initialValue));
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+
+  function refocusGrid(): void {
+    (ref.current?.closest('[role="grid"]') as HTMLElement | null)?.focus({
+      preventScroll: true,
+    });
+  }
+
+  return (
+    <input
+      ref={ref}
+      type={kind === "date" ? "date" : kind === "time" ? "time" : "datetime-local"}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => onCommit(inputValueToTemporal(kind, draft))}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          refocusGrid();
+          onCommit(inputValueToTemporal(kind, draft));
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          refocusGrid();
+          onCancel();
+        }
+      }}
+      className="absolute inset-0 z-20 w-full bg-background px-2 font-mono text-xs outline outline-2 -outline-offset-1 outline-primary"
+    />
+  );
+}
+
 function CellEditorWithFk({
   initialValue,
   nullable,
@@ -1354,9 +1629,15 @@ function CellEditorWithFk({
           e.stopPropagation();
           if (e.key === "Enter") {
             e.preventDefault();
+            (ref.current?.closest('[role="grid"]') as HTMLElement | null)?.focus({
+              preventScroll: true,
+            });
             freeTextCommit(draft);
           } else if (e.key === "Escape") {
             e.preventDefault();
+            (ref.current?.closest('[role="grid"]') as HTMLElement | null)?.focus({
+              preventScroll: true,
+            });
             onCancel();
           }
         }}

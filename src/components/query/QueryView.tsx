@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { EditorView } from "@codemirror/view";
 import {
   AlignLeft,
+  ChevronDown,
   ChevronRight,
   Database,
   Download,
+  ListTree,
   PanelRight,
   Play,
   TextSelect,
@@ -24,6 +26,12 @@ import { setActiveQueryRunner } from "@/lib/shortcuts";
 import { hasImplicitCommitDdl } from "@/lib/tx-classify";
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -39,7 +47,7 @@ import {
   fetchDatabases,
   fetchTables,
 } from "@/lib/db-queries";
-import { runScript } from "@/lib/query-queries";
+import { runScript, explainScript } from "@/lib/query-queries";
 import { splitStatements, statementAtOffset } from "@/lib/sql-splitter";
 import { t } from "@/lib/i18n";
 import { openExportDialog } from "@/stores/export-dialog";
@@ -92,7 +100,9 @@ export function QueryView({ tab }: { tab: Tab }) {
 
   const running = qState.running;
   const canRun = status === "connected" && connId !== null && !running;
-  const hasResults = qState.outcomes !== null;
+  // The results panel hosts both run outcomes and the EXPLAIN plan view.
+  const hasResults =
+    qState.outcomes !== null || qState.plan !== null || qState.planLoading;
 
   // Clear the global status bar when this tab goes away.
   const clearOnUnmount = useRef(clearDataStats);
@@ -168,7 +178,16 @@ export function QueryView({ tab }: { tab: Tab }) {
       let errors = 0;
       let resultSets = 0;
       let lastRowCount = 0;
+      let stmtNo = 0;
       for (const outcome of outcomes) {
+        stmtNo += 1;
+        // Full SQL logging (HeidiSQL parity): every statement lands in the
+        // message log with its text attached for re-running.
+        if (outcome.sql) {
+          const oneLine = outcome.sql.replace(/\s+/g, " ").trim();
+          const preview = oneLine.length > 160 ? `${oneLine.slice(0, 160)}…` : oneLine;
+          log("info", `${stmtNo}. ${preview}`, outcome.sql);
+        }
         switch (outcome.kind) {
           case "result_set":
             resultSets += 1;
@@ -178,7 +197,7 @@ export function QueryView({ tab }: { tab: Tab }) {
             break;
           case "error":
             errors += 1;
-            log("error", `${outcome.message}${outcome.sqlSnippet ? ` — in: ${outcome.sqlSnippet}` : ""}`);
+            log("error", `${outcome.message}${outcome.sqlSnippet ? ` — in: ${outcome.sqlSnippet}` : ""}`, outcome.sql);
             break;
         }
       }
@@ -188,6 +207,8 @@ export function QueryView({ tab }: { tab: Tab }) {
         running: false,
         totalMs,
         runNonce: useQueryEditorStore.getState().stateFor(tabId).runNonce + 1,
+        // Fresh results supersede any previous plan view.
+        plan: null,
       });
 
       if (outcomes.length === 0) {
@@ -239,6 +260,36 @@ export function QueryView({ tab }: { tab: Tab }) {
     }
 
     await runExecution(trimmed);
+  };
+
+  /**
+   * EXPLAIN every statement of the script (Heidi plan view parity).
+   * Whole-script like F9; errors and non-explainable statements are reported
+   * per statement inside the plan tab.
+   */
+  const handleExplain = async (analyze: boolean) => {
+    const docSql = useQueryEditorStore.getState().stateFor(tabId).sql.trim();
+    if (!docSql || connId === null || running || qState.planLoading) return;
+
+    patch(tabId, { planLoading: true, planAnalyze: analyze });
+    try {
+      const plan = await explainScript(connId, docSql, analyze);
+      const errors = plan.filter((s) => s.error).length;
+      const skipped = plan.filter((s) => s.skipped).length;
+      patch(tabId, {
+        plan,
+        planLoading: false,
+        planNonce: useQueryEditorStore.getState().stateFor(tabId).planNonce + 1,
+      });
+      log(
+        errors > 0 ? "error" : "success",
+        `Explain${analyze ? " analyze" : ""}: ${plan.length} statement(s) · ${errors} error(s) · ${skipped} skipped`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      patch(tabId, { planLoading: false });
+      log("error", `Explain failed: ${message}`);
+    }
   };
 
   // -- editor actions -------------------------------------------------------
@@ -408,6 +459,32 @@ export function QueryView({ tab }: { tab: Tab }) {
           <TooltipContent>Run statement under cursor</TooltipContent>
         </Tooltip>
 
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="xs" disabled={!canRun}>
+                  <ListTree data-icon="inline-start" />
+                  Explain
+                  <ChevronDown className="ml-0.5 size-3 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Query plan for the whole script</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem className="text-xs" onClick={() => void handleExplain(false)}>
+              <ListTree className="size-3.5" />
+              Explain
+            </DropdownMenuItem>
+            <DropdownMenuItem className="text-xs" onClick={() => void handleExplain(true)}>
+              <ListTree className="size-3.5" />
+              Explain Analyze
+              <span className="ml-1 text-muted-foreground">— executes the statement</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="xs" disabled={running} onClick={handleFormat}>
@@ -513,19 +590,23 @@ export function QueryView({ tab }: { tab: Tab }) {
                   </div>
                 </Panel>
 
-                {hasResults && qState.outcomes && (
+                {hasResults && (
                   <>
                     <ResizeHandle direction="vertical" />
                     <Panel defaultSize="45" minSize="8" className="min-h-0">
                       <QueryResults
                         tabId={tabId}
-                        outcomes={qState.outcomes}
+                        outcomes={qState.outcomes ?? []}
                         statementCount={statementCount}
                         totalMs={qState.totalMs}
                         runNonce={qState.runNonce}
                         onActiveResultSetChange={setActiveResultSet}
                         connId={connId}
                         dbContext={db}
+                        plan={qState.plan}
+                        planLoading={qState.planLoading}
+                        planAnalyze={qState.planAnalyze}
+                        planNonce={qState.planNonce}
                       />
                     </Panel>
                   </>

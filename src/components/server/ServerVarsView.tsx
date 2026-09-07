@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Clock, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { Check, Clock, Pencil, RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
 
 import { EmptyPlaceholder } from "@/components/layout/EmptyPlaceholder";
 import { Button } from "@/components/ui/button"
@@ -8,9 +9,12 @@ import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fetchStatus, fetchVariables, formatUptime, serverKeys } from "@/lib/server-queries";
+import { fetchStatus, fetchVariables, formatUptime, serverKeys, setServerVariable } from "@/lib/server-queries";
 import { log } from "@/stores/log";
+import { notify } from "@/lib/toast";
+import { useConnectionStore } from "@/stores/connection";
 import type { Tab } from "@/stores/tabs";
+import { cn } from "@/lib/utils";
 import type { StatusVariable, ServerVariable } from "@/types/ipc";
 
 /**
@@ -34,6 +38,28 @@ export function ServerVarsView({ tab }: { tab: Tab }) {
 
 function ServerVarsInner({ connId }: { connId: number }) {
   const [filter, setFilter] = useState("");
+  const dialect = useConnectionStore((s) => s.serverInfo?.dialect ?? "mysql");
+  const editable = dialect === "mysql";
+  /** Variable currently being edited (MySQL only). */
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const saveVar = useMutation({
+    mutationFn: (v: { name: string; value: string }) =>
+      setServerVariable(connId, v.name, v.value),
+    onSuccess: (_res, v) => {
+      notify.success(`SET GLOBAL ${v.name} applied.`);
+      log("success", `SET GLOBAL ${v.name} = '${v.value}'`, `SET GLOBAL ${v.name} = '${v.value}';`);
+      setEditingName(null);
+      void variables.refetch();
+    },
+    onError: (err) =>
+      notify.error(`SET GLOBAL failed: ${err instanceof Error ? err.message : String(err)}`),
+  });
+
+  function startEdit(name: string, value: string) {
+    setEditingName(name);
+    setEditDraft(value);
+  }
 
   const variables = useQuery({
     queryKey: serverKeys.variables(connId),
@@ -105,6 +131,14 @@ function ServerVarsInner({ connId }: { connId: number }) {
           isLoading={variables.isLoading}
           error={(variables.error as Error | null)?.message ?? null}
           emptyLabel="No variables match."
+          editable={editable}
+          editingName={editingName}
+          editDraft={editDraft}
+          editBusy={saveVar.isPending}
+          onEdit={startEdit}
+          onEditDraft={setEditDraft}
+          onSave={(name) => saveVar.mutate({ name, value: editDraft })}
+          onCancel={() => setEditingName(null)}
         />
       </TabsContent>
       <TabsContent value="status" className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -133,11 +167,28 @@ function NameValueTable({
   isLoading,
   error,
   emptyLabel,
+  editable = false,
+  editingName = null,
+  editDraft = "",
+  editBusy = false,
+  onEdit,
+  onEditDraft,
+  onSave,
+  onCancel,
 }: {
   rows: NameValueRow[];
   isLoading: boolean;
   error: string | null;
   emptyLabel: string;
+  /** MySQL only: variables can be edited via SET GLOBAL. */
+  editable?: boolean;
+  editingName?: string | null;
+  editDraft?: string;
+  editBusy?: boolean;
+  onEdit?: (name: string, value: string) => void;
+  onEditDraft?: (v: string) => void;
+  onSave?: (name: string) => void;
+  onCancel?: () => void;
 }) {
   if (error) {
     return <p className="p-4 text-center text-xs text-destructive">{error}</p>;
@@ -159,17 +210,72 @@ function NameValueTable({
       </TableHeader>
       <TableBody>
         {rows.map((r) => (
-          <TableRow key={r.name}>
+          <TableRow key={r.name} className="group/row">
             <TableCell className="font-mono">{r.name}</TableCell>
-            <TableCell
-              className="cursor-text font-mono select-all"
-              title="Click to select for copying"
-              onClick={(e) => window.getSelection()?.selectAllChildren(e.currentTarget)}
-            >
-              {r.value === "" ? (
-                <span className="italic text-muted-foreground/60">empty</span>
+            <TableCell className="font-mono">
+              {editable && editingName === r.name ? (
+                <span className="flex items-center gap-1">
+                  <Input
+                    autoFocus
+                    value={editDraft}
+                    onChange={(e) => onEditDraft?.(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") onSave?.(r.name);
+                      else if (e.key === "Escape") onCancel?.();
+                    }}
+                    className="h-6 font-mono text-xs"
+                    aria-label={`New value for ${r.name}`}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`Save ${r.name}`}
+                    disabled={editBusy}
+                    onClick={() => onSave?.(r.name)}
+                  >
+                    {editBusy ? <Spinner className="size-3" /> : <Check className="size-3.5 text-success" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`Cancel editing ${r.name}`}
+                    onClick={() => onCancel?.()}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </span>
               ) : (
-                r.value
+                <span
+                  className={cn(
+                    "select-all",
+                    editable && "flex items-center justify-between gap-1",
+                  )}
+                >
+                  <span
+                    className="cursor-text"
+                    title="Click to select for copying"
+                    onClick={(e) =>
+                      window.getSelection()?.selectAllChildren(e.currentTarget)
+                    }
+                  >
+                    {r.value === "" ? (
+                      <span className="italic text-muted-foreground/60">empty</span>
+                    ) : (
+                      r.value
+                    )}
+                  </span>
+                  {editable && onEdit && (
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`Edit ${r.name}`}
+                      className="opacity-0 group-hover/row:opacity-100 aria-expanded:opacity-100 focus-visible:opacity-100"
+                      onClick={() => onEdit(r.name, r.value)}
+                    >
+                      <Pencil className="size-3" />
+                    </Button>
+                  )}
+                </span>
               )}
             </TableCell>
           </TableRow>

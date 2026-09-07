@@ -27,7 +27,7 @@ export function EmptyPlaceholder({
   const openTab = useTabsStore((s) => s.openTab);
 
   return (
-    <Empty className="h-full select-none">
+    <Empty className="h-full animate-fade-rise select-none">
       <EmptyHeader>
         <EmptyMedia>
           <Icon className="size-8 text-muted-foreground/40" strokeWidth={1.5} />

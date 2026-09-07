@@ -5,6 +5,7 @@ import type { DiagramEdge } from "@/lib/diagram-model";
 import type { DiagramNode } from "@/lib/diagram-model";
 import {
   clampZoom,
+  EMPTY_DIAGRAM_TAB,
   useDiagramStore,
   type DiagramPoint,
   type DiagramViewport,
@@ -84,7 +85,10 @@ export function DiagramCanvas({
   const rafRef = useRef<number | null>(null);
 
   const patch = useDiagramStore((s) => s.patch);
-  const viewport = useDiagramStore((s) => s.byTab[tabId]?.viewport ?? { x: 0, y: 0, zoom: 1 });
+  // Stable fallback: a fresh object here would loop useSyncExternalStore.
+  const viewport = useDiagramStore(
+    (s) => s.byTab[tabId]?.viewport ?? EMPTY_DIAGRAM_TAB.viewport,
+  );
 
   // Track container size for fit math (ResizeObserver survives resizes).
   useEffect(() => {

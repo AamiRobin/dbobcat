@@ -164,9 +164,31 @@ pub struct ResolvedConnectionConfig {
     pub password: Option<String>,
     pub database: Option<String>,
     pub ssl_mode: SslMode,
+    /// Client certificate / key / CA file paths (HeidiSSL parity). Paths are
+    /// absolute; only meaningful for server engines.
+    pub ssl_files: Option<SslFiles>,
     /// When present, the DB endpoint is reached through an SSH tunnel.
     /// (Server engines only; SQLite ignores it.)
     pub ssh: Option<SshTunnelConfig>,
+}
+
+/// TLS identity/trust files for a session (HeidiSSL parity): client
+/// certificate + private key and/or a trusted CA certificate, all PEM.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SslFiles {
+    #[serde(default)]
+    pub ca_path: Option<String>,
+    #[serde(default)]
+    pub cert_path: Option<String>,
+    #[serde(default)]
+    pub key_path: Option<String>,
+}
+
+impl SslFiles {
+    pub fn is_empty(&self) -> bool {
+        self.ca_path.is_none() && self.cert_path.is_none() && self.key_path.is_none()
+    }
 }
 
 /// One page of rows read server-side (offset/limit paging).

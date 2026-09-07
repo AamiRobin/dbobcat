@@ -12,7 +12,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, State};
 
 use crate::connections::manager::ConnectionManager;
-use crate::connections::QueryOutcome;
+use crate::connections::dialect::SqlDialect;
+use crate::connections::script::split_statements;
+use crate::connections::{QueryOutcome, RowValue};
 use crate::error::Result;
 use crate::settings;
 
@@ -125,6 +127,143 @@ pub async fn query_history_clear(app: AppHandle) -> Result<()> {
     settings::set_setting(&app, HISTORY_KEY, serde_json::json!([]))
 }
 
+// ---------------------------------------------------------------------------
+// EXPLAIN (query profiling — HeidiSQL plan view parity)
+// ---------------------------------------------------------------------------
+
+/// One statement's EXPLAIN output. `skipped` marks statement types that have
+/// no plan (SET/USE/DDL…); `error` carries per-statement failures.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplainStatement {
+    /// The EXPLAIN-wrapped statement actually sent (verbatim when skipped).
+    pub sql: String,
+    /// The original statement text.
+    pub source_sql: String,
+    pub skipped: bool,
+    /// Why the statement was skipped (only when `skipped`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Plan column names (engine-specific), present on successful plans.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub columns: Option<Vec<String>>,
+    /// Plan rows; cells stay tagged [`RowValue`]s so the frontend formats
+    /// them with the same renderer as every other grid.
+    pub rows: Vec<Vec<RowValue>>,
+    pub elapsed_ms: u64,
+}
+
+/// Statement keywords that produce a plan when wrapped in EXPLAIN.
+fn is_explainable(stmt: &str) -> bool {
+    let trimmed = stmt.trim_start();
+    let head = trimmed
+        .split(|c: char| c.is_whitespace())
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    matches!(
+        head.as_str(),
+        "SELECT" | "WITH" | "INSERT" | "REPLACE" | "UPDATE" | "DELETE" | "TABLE" | "VALUES"
+    )
+}
+
+/// Dialect-aware EXPLAIN wrapper. SQLite only has `EXPLAIN QUERY PLAN`
+/// (bytecode `EXPLAIN` is useless here) and has no ANALYZE form.
+fn wrap_explain(dialect: SqlDialect, stmt: &str, analyze: bool) -> (String, Option<String>) {
+    match dialect {
+        SqlDialect::Mysql | SqlDialect::Postgres => {
+            if analyze {
+                (format!("EXPLAIN ANALYZE {stmt}"), None)
+            } else {
+                (format!("EXPLAIN {stmt}"), None)
+            }
+        }
+        SqlDialect::Sqlite => {
+            let note = analyze
+                .then(|| "SQLite has no EXPLAIN ANALYZE — showing the query plan".to_string());
+            (format!("EXPLAIN QUERY PLAN {stmt}"), note)
+        }
+    }
+}
+
+/// Run EXPLAIN (optionally ANALYZE) per statement of the script. Reuses the
+/// [`ConnectionManager::run_script`] pipeline: statements are split, wrapped
+/// in dialect-appropriate EXPLAIN forms and sent as one script with
+/// stop-on-error disabled so every statement reports back.
+#[tauri::command]
+pub async fn query_explain(
+    connections: State<'_, ConnectionManager>,
+    conn_id: u32,
+    sql: String,
+    analyze: Option<bool>,
+) -> Result<Vec<ExplainStatement>> {
+    let analyze = analyze.unwrap_or(false);
+    let dialect = connections.server_info(conn_id).await?.dialect;
+
+    let mut slots: Vec<ExplainStatement> = Vec::new();
+    let mut wrapped: Vec<String> = Vec::new();
+    for stmt in split_statements(&sql) {
+        if !is_explainable(&stmt) {
+            slots.push(ExplainStatement {
+                sql: stmt.clone(),
+                source_sql: stmt,
+                skipped: true,
+                note: Some("statement type has no query plan".into()),
+                error: None,
+                columns: None,
+                rows: Vec::new(),
+                elapsed_ms: 0,
+            });
+            continue;
+        }
+        let (wrapped_sql, note) = wrap_explain(dialect, &stmt, analyze);
+        slots.push(ExplainStatement {
+            sql: wrapped_sql,
+            source_sql: stmt,
+            skipped: false,
+            note,
+            error: None,
+            columns: None,
+            rows: Vec::new(),
+            elapsed_ms: 0,
+        });
+        wrapped.push(slots.last().unwrap().sql.clone());
+    }
+
+    if wrapped.is_empty() {
+        return Ok(slots);
+    }
+
+    // No stop-on-error: every statement reports back, errors included.
+    let outcomes = connections
+        .run_script(conn_id, wrapped.join(";\n"), false)
+        .await?;
+
+    let mut outcome_iter = outcomes.into_iter();
+    for slot in slots.iter_mut().filter(|s| !s.skipped) {
+        match outcome_iter.next() {
+            None => {
+                slot.error = Some("statement was not executed".into());
+            }
+            Some(QueryOutcome::ResultSet { columns, rows, elapsed_ms, .. }) => {
+                slot.columns = Some(columns.into_iter().map(|c| c.name).collect());
+                slot.rows = rows;
+                slot.elapsed_ms = elapsed_ms;
+            }
+            Some(QueryOutcome::Exec { elapsed_ms, .. }) => {
+                slot.elapsed_ms = elapsed_ms;
+                slot.error = Some("statement returned no plan rows".into());
+            }
+            Some(QueryOutcome::Error { message, .. }) => {
+                slot.error = Some(message);
+            }
+        }
+    }
+    Ok(slots)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +321,60 @@ mod tests {
         }
         assert_eq!(existing.len(), MAX_HISTORY_ENTRIES);
         assert_eq!(existing[0].sql, format!("Q{}", MAX_HISTORY_ENTRIES + 24));
+    }
+
+    // -- EXPLAIN helpers ------------------------------------------------------
+
+    #[test]
+    fn explainable_keywords() {
+        for stmt in [
+            "SELECT 1",
+            "  select * from t where x = 1",
+            "WITH cte AS (SELECT 1) SELECT * FROM cte",
+            "INSERT INTO t VALUES (1)",
+            "REPLACE INTO t VALUES (1)",
+            "UPDATE t SET x = 1",
+            "DELETE FROM t",
+            "TABLE t",       // MySQL 8 shorthand
+            "VALUES (1, 2)", // MySQL 8 table value constructor
+        ] {
+            assert!(is_explainable(stmt), "should be explainable: {stmt}");
+        }
+        for stmt in [
+            "SET @x = 1",
+            "USE shop",
+            "CREATE TABLE t (id INT)",
+            "DROP TABLE t",
+            "BEGIN",
+            "COMMIT",
+            "SHOW TABLES",
+            "",
+        ] {
+            assert!(!is_explainable(stmt), "should NOT be explainable: {stmt}");
+        }
+    }
+
+    #[test]
+    fn wrap_mysql_and_postgres_match_analyze() {
+        let (sql, note) = wrap_explain(SqlDialect::Mysql, "SELECT 1", false);
+        assert_eq!(sql, "EXPLAIN SELECT 1");
+        assert!(note.is_none());
+
+        let (sql, _) = wrap_explain(SqlDialect::Postgres, "SELECT 1", true);
+        assert_eq!(sql, "EXPLAIN ANALYZE SELECT 1");
+
+        let (sql, _) = wrap_explain(SqlDialect::Mysql, "SELECT 1", true);
+        assert_eq!(sql, "EXPLAIN ANALYZE SELECT 1");
+    }
+
+    #[test]
+    fn wrap_sqlite_uses_query_plan_and_ignores_analyze() {
+        let (sql, note) = wrap_explain(SqlDialect::Sqlite, "SELECT 1", false);
+        assert_eq!(sql, "EXPLAIN QUERY PLAN SELECT 1");
+        assert!(note.is_none());
+
+        let (sql, note) = wrap_explain(SqlDialect::Sqlite, "SELECT 1", true);
+        assert_eq!(sql, "EXPLAIN QUERY PLAN SELECT 1");
+        assert_eq!(note.as_deref(), Some("SQLite has no EXPLAIN ANALYZE — showing the query plan"));
     }
 }

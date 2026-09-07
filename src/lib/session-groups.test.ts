@@ -7,6 +7,7 @@ import {
   buildSessionTree,
   existingGroupPaths,
   parseGroupPath,
+  regroupSessions,
   sessionColor,
 } from "./session-groups";
 
@@ -106,5 +107,45 @@ describe("sessionColor", () => {
     expect(sessionColor({ color: "#123456" })).toBeNull();
     expect(sessionColor({ color: null })).toBeNull();
     expect(sessionColor({})).toBeNull();
+  });
+});
+
+describe("regroupSessions", () => {
+  test("moves a session into a group, keeping array order", () => {
+    const list = [session("a"), session("b")];
+    const next = regroupSessions(list, "a", "Work/Prod");
+    expect(next.map((s) => s.id)).toEqual(["a", "b"]);
+    expect(next.find((s) => s.id === "a")!.group).toBe("Work/Prod");
+  });
+
+  test("moving to root (\"\") clears the group", () => {
+    const list = [session("a", "Work/Prod")];
+    const next = regroupSessions(list, "a", "");
+    expect(next.find((s) => s.id === "a")!.group).toBe("");
+  });
+
+  test("unchanged group returns the same array reference", () => {
+    const list = [session("a", "Work")];
+    expect(regroupSessions(list, "a", "Work")).toBe(list);
+    // A nullish stored group counts as ungrouped "".
+    const ungrouped = [session("a")];
+    expect(regroupSessions(ungrouped, "a", "")).toBe(ungrouped);
+  });
+
+  test("does not mutate the input; other sessions keep reference identity", () => {
+    const a = session("a", "Work");
+    const b = session("b", "Other");
+    const list = [a, b];
+    const next = regroupSessions(list, "a", "Moved");
+    expect(list[0].group).toBe("Work");
+    expect(next).not.toBe(list);
+    expect(next[1]).toBe(b);
+    expect(next[0]).not.toBe(a);
+    expect(next[0].group).toBe("Moved");
+  });
+
+  test("unknown id returns the array unchanged", () => {
+    const list = [session("a", "Work")];
+    expect(regroupSessions(list, "nope", "Other")).toBe(list);
   });
 });

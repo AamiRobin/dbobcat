@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { QueryOutcome } from "@/types/ipc";
+import type { ExplainStatement, QueryOutcome } from "@/types/ipc";
 import { useTabsStore, type Tab } from "@/stores/tabs";
 
 /**
@@ -27,6 +27,14 @@ export interface QueryTabState {
   executedSql: string | null;
   /** Phase 9-B: right-hand helpers panel (columns/snippets/reference). */
   helpersOpen: boolean;
+  /** EXPLAIN output of the last explain request; null until first use. */
+  plan: ExplainStatement[] | null;
+  /** True while an EXPLAIN request is in flight. */
+  planLoading: boolean;
+  /** True when the last plan ran with ANALYZE (badge in the plan tab). */
+  planAnalyze: boolean;
+  /** Increments on every completed explain — focuses the plan tab. */
+  planNonce: number;
 }
 
 export const EMPTY_QUERY_TAB: QueryTabState = {
@@ -39,6 +47,10 @@ export const EMPTY_QUERY_TAB: QueryTabState = {
   stopOnError: true,
   executedSql: null,
   helpersOpen: false,
+  plan: null,
+  planLoading: false,
+  planAnalyze: false,
+  planNonce: 0,
 };
 
 interface QueryEditorState {

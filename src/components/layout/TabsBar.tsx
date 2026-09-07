@@ -99,7 +99,9 @@ export function TabsBar() {
               onClick={() => setActive(tab.id)}
               onKeyDown={(e) => e.key === "Enter" && setActive(tab.id)}
               className={cn(
-                "group/tab my-1 flex cursor-default select-none items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium outline-none transition-colors",
+                // tab-in plays once per mount: opening a tab eases in while
+                // existing tabs stay still.
+                "group/tab my-1 flex cursor-default select-none items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium outline-none transition-colors animate-tab-in",
                 active
                   ? "border-border bg-background text-foreground shadow-xs"
                   : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",

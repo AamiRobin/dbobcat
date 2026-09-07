@@ -23,6 +23,16 @@ export type SqlDialect = "mysql" | "postgres" | "sqlite";
 export type SslMode = "disabled" | "preferred" | "required";
 
 /**
+ * TLS identity/trust files for a session (HeidiSQL parity): PEM paths for a
+ * client certificate + private key and/or a trusted CA certificate.
+ */
+export interface SslFiles {
+  caPath?: string | null;
+  certPath?: string | null;
+  keyPath?: string | null;
+}
+
+/**
  * SSH authentication. Mirrors `SshAuth` (internally tagged via `method`).
  * Neither variant carries a stored secret in SavedSession JSON: the SSH login
  * password lives in the encrypted credential store under `<sessionId>#ssh`,
@@ -58,6 +68,8 @@ export interface SavedSession {
   sslMode: SslMode;
   useSsh: boolean;
   ssh?: SshConfig | null;
+  /** TLS identity/trust files (server engines; passwords never included). */
+  ssl?: SslFiles | null;
   // Phase 9-B organization + resilience metadata (all optional so older
   // settings.json payloads keep loading).
   /** Slash-separated folder path, e.g. "Work/Prod". */
@@ -374,6 +386,8 @@ export type QueryOutcome =
       kind: "error";
       message: string;
       sqlSnippet: string;
+      /** Full source statement text (full SQL logging). */
+      sql?: string;
       /** PG 25P02: the failure poisoned an open transaction. */
       abortedTx?: boolean;
     };
@@ -384,6 +398,42 @@ export interface HistoryEntry {
   sql: string;
   connName: string;
   executedAt: string;
+}
+
+/** Summary of a settings.json export (HeidiSQL "settings file" parity). */
+export interface SettingsExportSummary {
+  keys: number;
+  sessions: number;
+  path: string;
+}
+
+/** Summary of a settings.json import (sessions merge by id). */
+export interface SettingsImportSummary {
+  keysImported: number;
+  sessionsAdded: number;
+  sessionsUpdated: number;
+}
+
+/**
+ * Per-statement EXPLAIN output (`query_explain`). Mirrors the Rust
+ * `ExplainStatement`. Plan cells stay tagged [`RowValue`]s so the frontend
+ * formats them with the same renderer as every other grid.
+ */
+export interface ExplainStatement {
+  /** The EXPLAIN-wrapped statement actually sent (verbatim when skipped). */
+  sql: string;
+  /** The original statement text. */
+  sourceSql: string;
+  /** True for statement types that have no plan (SET/USE/DDL…). */
+  skipped: boolean;
+  /** Why the statement was skipped (only when skipped). */
+  note?: string | null;
+  /** Per-statement failure (driver error or "no plan rows"). */
+  error?: string | null;
+  /** Plan column names (engine-specific), present on successful plans. */
+  columns?: string[] | null;
+  rows: RowValue[][];
+  elapsedMs: number;
 }
 
 /**
@@ -557,6 +607,18 @@ export interface ObjectOpResult {
   name: string;
   ok: boolean;
   error?: string | null;
+}
+
+/**
+ * One table's bulk table editor request (MySQL/MariaDB parity): move to
+ * another database and/or change engine/charset/collation. `null` = keep.
+ */
+export interface BulkAlterRequest {
+  table: string;
+  newDb?: string | null;
+  engine?: string | null;
+  charset?: string | null;
+  collation?: string | null;
 }
 
 export type MaintenanceOp =

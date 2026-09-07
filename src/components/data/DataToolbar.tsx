@@ -1,5 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import {
+  Columns3,
+  CornerDownLeft,
   Download,
   FileUp,
   Plus,
@@ -8,9 +10,12 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
+import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -70,11 +75,19 @@ export interface DataToolbarProps {
   onExportGrid: () => void;
   /** Open the CSV import wizard preselecting this table. */
   onImportTable: () => void;
+  /** Column names hidden from the grid (persisted per table). */
+  hiddenColumns: ReadonlySet<string>;
+  /** Show (true) or hide (false) one column of the grid. */
+  onToggleColumnVisibility: (name: string, visible: boolean) => void;
+  /** Undo the most recent pending change. */
+  onUndo: () => void;
 }
 
 export function DataToolbar(props: DataToolbarProps) {
   const changeset = useChangesetStore((s) => s.byTab[props.tabId]);
   const clearChangeset = useChangesetStore((s) => s.clear);
+  // Primitive subscription — re-renders only when undo availability flips.
+  const canUndo = useChangesetStore((s) => (s.history[props.tabId]?.length ?? 0) > 0);
   const pending = changesetCount(changeset);
 
   const post = useMutation({
@@ -154,8 +167,28 @@ export function DataToolbar(props: DataToolbarProps) {
       <ToolButton tooltip="Import into table…" onClick={props.onImportTable}>
         <FileUp />
       </ToolButton>
+      <ColumnsMenu
+        columns={props.columns}
+        hidden={props.hiddenColumns}
+        onToggle={props.onToggleColumnVisibility}
+      />
 
       <Separator orientation="vertical" className="mx-1 h-5!" />
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="xs"
+            disabled={!canUndo}
+            onClick={props.onUndo}
+          >
+            <CornerDownLeft data-icon="inline-start" />
+            Undo
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Undo last pending change (Ctrl+Z)</TooltipContent>
+      </Tooltip>
 
       <Tooltip>
         <TooltipTrigger asChild>
@@ -186,7 +219,12 @@ export function DataToolbar(props: DataToolbarProps) {
             )}
             Post changes
             {pending > 0 && (
-              <Badge variant="secondary" className="ml-0.5 h-4 px-1 font-mono text-[10px]">
+              // key re-mounts the badge on every count change → the pop replays.
+              <Badge
+                key={pending}
+                variant="secondary"
+                className="ml-0.5 h-4 animate-badge-pop px-1 font-mono text-[10px]"
+              >
                 {pending}
               </Badge>
             )}
@@ -207,7 +245,7 @@ export function DataToolbar(props: DataToolbarProps) {
           value={String(props.pageSize)}
           onValueChange={(v) => props.onPageSizeChange(Number(v))}
         >
-          <SelectTrigger size="sm" className="h-7 w-[88px] text-xs" aria-label="Page size">
+          <SelectTrigger size="sm" className="h-7 w-[100px] text-xs" aria-label="Page size">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -304,5 +342,88 @@ function ToolButton({
       </TooltipTrigger>
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
+  );
+}
+
+/**
+ * Show/hide grid columns. Hiding is display-only: pending edits keep their
+ * meaning and hidden columns stay in copies/exports made through the export
+ * dialog (row copy respects visibility).
+ */
+function ColumnsMenu({
+  columns,
+  hidden,
+  onToggle,
+}: {
+  columns: ColumnMeta[];
+  hidden: ReadonlySet<string>;
+  onToggle: (name: string, visible: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const hiddenCount = columns.filter((c) => hidden.has(c.name)).length;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      {/* Tooltip wraps the popover trigger: tooltip triggers merge props down
+          the asChild chain, popover triggers must sit below it. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Show / hide columns"
+              className={
+                hiddenCount > 0
+                  ? "relative text-foreground"
+                  : "text-muted-foreground"
+              }
+            >
+              <Columns3 />
+              {hiddenCount > 0 && (
+                <span
+                  aria-hidden
+                  className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-primary"
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Show / hide columns</TooltipContent>
+      </Tooltip>
+      <PopoverContent align="start" className="w-60 p-1.5">
+        <p className="px-1.5 pb-1 pt-0.5 text-[11px] font-medium text-muted-foreground">
+          Visible columns
+        </p>
+        <div className="max-h-72 overflow-y-auto">
+          {columns.map((col) => (
+            <div
+              key={col.name}
+              role="checkbox"
+              aria-checked={!hidden.has(col.name)}
+              tabIndex={0}
+              onClick={() => onToggle(col.name, hidden.has(col.name))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onToggle(col.name, hidden.has(col.name));
+                }
+              }}
+              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-accent/60"
+            >
+              {/* Visual only — the row handles clicks so they never double-fire. */}
+              <Checkbox
+                checked={!hidden.has(col.name)}
+                tabIndex={-1}
+                className="pointer-events-none"
+              />
+              <span className="truncate font-mono" title={col.name}>
+                {col.name}
+              </span>
+            </div>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Search,
   Sigma,
+  SlidersHorizontal,
   Star,
   Stethoscope,
   Table,
@@ -57,6 +58,7 @@ import {
   fetchRoutines,
   fetchTriggers,
   objKeys,
+  renameTable,
   truncateTables,
 } from "@/lib/object-queries";
 import { compileTreeFilter, type TreeMatcher } from "@/lib/tree-filter";
@@ -158,10 +160,28 @@ interface RowProps {
   children: React.ReactNode;
   menu: React.ReactNode;
   className?: string;
+  /** HTML5 drag & drop (table move, session regroup). */
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  onDragEnd?: (e: React.DragEvent) => void;
 }
 
 /** A tree row with chevron + right-click context menu. */
-function TreeRow({ open = false, onToggle, onDoubleClick, children, menu, className }: RowProps) {
+function TreeRow({
+  open = false,
+  onToggle,
+  onDoubleClick,
+  children,
+  menu,
+  className,
+  draggable,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}: RowProps) {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -169,8 +189,13 @@ function TreeRow({ open = false, onToggle, onDoubleClick, children, menu, classN
           type="button"
           onClick={onToggle}
           onDoubleClick={onDoubleClick}
+          draggable={draggable}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          onDragEnd={onDragEnd}
           className={cn(
-            "flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-xs hover:bg-accent/60",
+            "flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-xs transition-colors hover:bg-accent/60",
             className,
           )}
         >
@@ -253,6 +278,17 @@ function RefreshItem({ onClick }: { onClick: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
+// Table drag payload (table move)
+// ---------------------------------------------------------------------------
+
+/**
+ * Payload of the table currently being dragged. Module-level because
+ * dataTransfer.getData() is unavailable inside dragover, and the drag source
+ * (TableNode) and drop target (DatabaseNode) are sibling components.
+ */
+let tableDragPayload: { db: string; table: string } | null = null;
+
+// ---------------------------------------------------------------------------
 // Table node (columns loaded lazily)
 // ---------------------------------------------------------------------------
 
@@ -267,10 +303,29 @@ const KIND_LABELS: Record<TableKind, string> = {
 function TableNode({ connId, database, table }: { connId: number; database: string; table: TableMeta }) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<"drop" | "truncate" | null>(null);
+  /** Cross-database move staged by drag & drop (target db). */
+  const [pendingMoveDb, setPendingMoveDb] = useState<string | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const queryClient = useQueryClient();
   const dialogs = useTreeDialogsStore();
   const filtering = useFiltering();
+
+  const applyMove = async () => {
+    if (pendingMoveDb === null) return;
+    setMoveBusy(true);
+    try {
+      await renameTable(connId, database, table.name, table.name, pendingMoveDb);
+      notify.success(`Table \`${table.name}\` moved to ${pendingMoveDb}.`);
+      void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, database) });
+      void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, pendingMoveDb) });
+    } catch (err) {
+      notify.error(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setMoveBusy(false);
+      setPendingMoveDb(null);
+    }
+  };
 
   const runConfirmed = async () => {
     if (!confirming) return;
@@ -317,7 +372,19 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
       <TreeRow
         open={open}
         onToggle={() => setOpen(!open)}
-        onDoubleClick={designTable}
+        // Heidi-style: opening a table shows its data; the designer stays on
+        // the context menu.
+        onDoubleClick={openData}
+        draggable
+        onDragStart={(e) => {
+          // Mirror the payload module-level: getData() is blocked on dragover.
+          tableDragPayload = { db: database, table: table.name };
+          e.dataTransfer.setData("application/x-murmeli-table", JSON.stringify({ db: database, table: table.name }));
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragEnd={() => {
+          tableDragPayload = null;
+        }}
         menu={
           <>
             <ContextMenuItem onClick={openData}>
@@ -380,6 +447,22 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
         <span className="truncate">{table.name}</span>
         <FavoriteStar db={database} table={table.name} />
       </TreeRow>
+
+      <ConfirmDialog
+        open={pendingMoveDb !== null}
+        onOpenChange={(o) => !o && setPendingMoveDb(null)}
+        title="Move table?"
+        description={
+          <>
+            Table <span className="font-mono">{table.name}</span> will be moved from{" "}
+            <span className="font-mono">{database}</span> to{" "}
+            <span className="font-mono">{pendingMoveDb}</span> (RENAME TABLE across databases).
+          </>
+        }
+        confirmLabel="Move"
+        busy={moveBusy}
+        onConfirm={() => void applyMove()}
+      />
 
       <ConfirmDialog
         open={confirming !== null}
@@ -1180,7 +1263,11 @@ function DatabaseNode({
   defaultOpen?: boolean;
 }) {
   const { matcher, favoritesOnly, favorites } = useTreeFilter();
+  const dialogs = useTreeDialogsStore();
   const [open, setOpen] = useState(defaultOpen);
+  /** Cross-database move staged by drag & drop (source db + table). */
+  const [pendingMove, setPendingMove] = useState<{ db: string; table: string } | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
   const queryClient = useQueryClient();
   // A pattern forces the db open so its object lists load and filter;
   // favorites-only renders a flat starred list instead of the groups.
@@ -1197,11 +1284,37 @@ function DatabaseNode({
     void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, name) });
   }
 
+  const applyMove = async () => {
+    if (pendingMove === null) return;
+    setMoveBusy(true);
+    try {
+      await renameTable(connId, pendingMove.db, pendingMove.table, pendingMove.table, name);
+      notify.success(`Table \`${pendingMove.table}\` moved to ${name}.`);
+      void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, pendingMove.db) });
+      void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, name) });
+    } catch (err) {
+      notify.error(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setMoveBusy(false);
+      setPendingMove(null);
+    }
+  };
+
   return (
     <li>
       <TreeRow
         open={forceOpen ? true : open}
         onToggle={() => setOpen(!open)}
+        onDragOver={(e) => {
+          // Only claim the drop for a table dragged from a different db.
+          if (tableDragPayload && tableDragPayload.db !== name) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const payload = tableDragPayload;
+          tableDragPayload = null;
+          if (payload && payload.db !== name) setPendingMove(payload);
+        }}
         menu={
           <>
             <ContextMenuItem onClick={() => openDiagramTab(connId, name)}>
@@ -1227,6 +1340,10 @@ function DatabaseNode({
               <FileUp />
               Import CSV…
             </ContextMenuItem>
+            <ContextMenuItem onClick={() => dialogs.openBulkAlter({ db: name })}>
+              <SlidersHorizontal />
+              Bulk Table Editor…
+            </ContextMenuItem>
             <ContextMenuSeparator />
             <CopyNameItem name={name} />
             <RefreshItem onClick={refresh} />
@@ -1236,6 +1353,22 @@ function DatabaseNode({
         <Database className="size-3.5 shrink-0 text-success" />
         <span className="truncate font-medium">{name}</span>
       </TreeRow>
+
+      <ConfirmDialog
+        open={pendingMove !== null}
+        onOpenChange={(o) => !o && setPendingMove(null)}
+        title="Move table?"
+        description={
+          <>
+            Table <span className="font-mono">{pendingMove?.table}</span> will be moved from{" "}
+            <span className="font-mono">{pendingMove?.db}</span> to{" "}
+            <span className="font-mono">{name}</span> (RENAME TABLE across databases).
+          </>
+        }
+        confirmLabel="Move"
+        busy={moveBusy}
+        onConfirm={() => void applyMove()}
+      />
 
       {favoritesOnly ? (
         favEntries.length > 0 && (

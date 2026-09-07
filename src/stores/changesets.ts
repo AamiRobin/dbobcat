@@ -28,9 +28,7 @@ export interface GridChangeset {
   inserts: InsertedRow[];
   /** Real-row indexes marked for deletion. */
   deletes: Set<number>;
-}
-
-export const EMPTY_CHANGESET: GridChangeset = {
+}export const EMPTY_CHANGESET: GridChangeset = {
   updates: {},
   inserts: [],
   deletes: new Set<number>(),
@@ -55,16 +53,34 @@ export function queryChangesetKey(tabId: string, resultIndex: number): string {
   return `${tabId}#res${resultIndex}`;
 }
 
+/**
+ * One reversible changeset mutation, recorded for per-change undo (Ctrl+Z,
+ * HeidiSQL grid style). Reversals are applied WITHOUT recording so undo never
+ * grows the stack.
+ */
+type UndoOp =
+  | { k: "update"; key: string; prev: RowValue | undefined }
+  | { k: "removeUpdate"; key: string; prev: RowValue }
+  | { k: "insert"; id: string }
+  | { k: "removeInsert"; row: InsertedRow }
+  | { k: "insertValue"; id: string; column: string; prev: RowValue | undefined }
+  | { k: "deleteToggle"; rowIndex: number }
+  | { k: "clear"; snapshot: GridChangeset };
+
 interface ChangesetsState {
   byTab: Record<string, GridChangeset>;
+  /** Reverse-chronological undo ops per tab (newest last, capped). */
+  history: Record<string, UndoOp[]>;
   /** Replace one cell's pending value (or remove the edit when reverting). */
   setUpdate: (tabId: string, rowIndex: number, colIndex: number, value: RowValue) => void;
   removeUpdate: (tabId: string, rowIndex: number, colIndex: number) => void;
-  addInsertRow: (tabId: string) => string;
+  addInsertRow: (tabId: string, values?: Record<string, RowValue>) => string;
   removeInsertRow: (tabId: string, rowId: string) => void;
   setInsertValue: (tabId: string, rowId: string, column: string, value: RowValue) => void;
   toggleDeleteRow: (tabId: string, rowIndex: number) => void;
   clear: (tabId: string) => void;
+  /** Reverse the most recent pending change; no-op when history is empty. */
+  undo: (tabId: string) => void;
 }
 
 function mutate(
@@ -79,74 +95,210 @@ function mutate(
   return { byTab: { ...state.byTab, [tabId]: next } };
 }
 
+const HISTORY_CAP = 200;
+
+function record(
+  state: ChangesetsState,
+  tabId: string,
+  op: UndoOp,
+): Partial<ChangesetsState> {
+  const stack = state.history[tabId] ?? [];
+  const next = stack.length >= HISTORY_CAP ? stack.slice(1) : stack.slice();
+  next.push(op);
+  return { history: { ...state.history, [tabId]: next } };
+}
+
 let insertSeq = 0;
 
-export const useChangesetStore = create<ChangesetsState>((set) => ({
+export const useChangesetStore = create<ChangesetsState>((set, get) => ({
   byTab: {},
 
+  history: {},
+
   setUpdate: (tabId, rowIndex, colIndex, value) =>
-    set((state) =>
-      mutate(state, tabId, (cs) => ({
-        ...cs,
-        updates: { ...cs.updates, [updateKey(rowIndex, colIndex)]: value },
-      })),
-    ),
+    set((state) => {
+      const key = updateKey(rowIndex, colIndex);
+      const cs = state.byTab[tabId] ?? EMPTY_CHANGESET;
+      const prev = cs.updates[key];
+      if (prev && sameScalarLike(prev, value)) return state;
+      return {
+        ...mutate(state, tabId, (cur) => ({
+          ...cur,
+          updates: { ...cur.updates, [key]: value },
+        })),
+        ...record(state, tabId, { k: "update", key, prev }),
+      };
+    }),
 
   removeUpdate: (tabId, rowIndex, colIndex) =>
-    set((state) =>
-      mutate(state, tabId, (cs) => {
-        if (!(updateKey(rowIndex, colIndex) in cs.updates)) return cs;
-        const updates = { ...cs.updates };
-        delete updates[updateKey(rowIndex, colIndex)];
-        return { ...cs, updates };
-      }),
-    ),
+    set((state) => {
+      const key = updateKey(rowIndex, colIndex);
+      const cs = state.byTab[tabId] ?? EMPTY_CHANGESET;
+      const prev = cs.updates[key];
+      if (prev === undefined) return state;
+      return {
+        ...mutate(state, tabId, (cur) => {
+          const updates = { ...cur.updates };
+          delete updates[key];
+          return { ...cur, updates };
+        }),
+        ...record(state, tabId, { k: "removeUpdate", key, prev }),
+      };
+    }),
 
-  addInsertRow: (tabId) => {
+  addInsertRow: (tabId, values) => {
     const id = `n${++insertSeq}`;
-    set((state) =>
-      mutate(state, tabId, (cs) => ({
+    set((state) => ({
+      ...mutate(state, tabId, (cs) => ({
         ...cs,
-        inserts: [...cs.inserts, { id, values: {} }],
+        inserts: [...cs.inserts, { id, values: values ?? {} }],
       })),
-    );
+      ...record(state, tabId, { k: "insert", id }),
+    }));
     return id;
   },
 
   removeInsertRow: (tabId, rowId) =>
-    set((state) =>
-      mutate(state, tabId, (cs) => ({
-        ...cs,
-        inserts: cs.inserts.filter((r) => r.id !== rowId),
-      })),
-    ),
+    set((state) => {
+      const cs = state.byTab[tabId];
+      const row = cs?.inserts.find((r) => r.id === rowId);
+      if (!row) return state;
+      return {
+        ...mutate(state, tabId, (cur) => ({
+          ...cur,
+          inserts: cur.inserts.filter((r) => r.id !== rowId),
+        })),
+        ...record(state, tabId, { k: "removeInsert", row }),
+      };
+    }),
 
   setInsertValue: (tabId, rowId, column, value) =>
-    set((state) =>
-      mutate(state, tabId, (cs) => ({
-        ...cs,
-        inserts: cs.inserts.map((row) =>
-          row.id === rowId ? { ...row, values: { ...row.values, [column]: value } } : row,
-        ),
-      })),
-    ),
+    set((state) => {
+      const cs = state.byTab[tabId];
+      const row = cs?.inserts.find((r) => r.id === rowId);
+      const prev = row?.values[column];
+      if (prev && sameScalarLike(prev, value)) return state;
+      return {
+        ...mutate(state, tabId, (cur) => ({
+          ...cur,
+          inserts: cur.inserts.map((r) =>
+            r.id === rowId ? { ...r, values: { ...r.values, [column]: value } } : r,
+          ),
+        })),
+        ...record(state, tabId, { k: "insertValue", id: rowId, column, prev }),
+      };
+    }),
 
   toggleDeleteRow: (tabId, rowIndex) =>
-    set((state) =>
-      mutate(state, tabId, (cs) => {
+    set((state) => ({
+      ...mutate(state, tabId, (cs) => {
         const deletes = new Set(cs.deletes);
         if (deletes.has(rowIndex)) deletes.delete(rowIndex);
         else deletes.add(rowIndex);
         return { ...cs, deletes };
       }),
-    ),
+      ...record(state, tabId, { k: "deleteToggle", rowIndex }),
+    })),
 
   clear: (tabId) =>
     set((state) => {
       if (!(tabId in state.byTab)) return state;
-      return { byTab: { ...state.byTab, [tabId]: EMPTY_CHANGESET } };
+      const snapshot = state.byTab[tabId];
+      return {
+        ...mutate(state, tabId, () => EMPTY_CHANGESET),
+        ...record(state, tabId, { k: "clear", snapshot }),
+      };
     }),
+
+  undo: (tabId) => {
+    const state = get();
+    const stack = state.history[tabId];
+    const op = stack?.[stack.length - 1];
+    if (!op) return;
+    set((cur) => {
+      const stack = cur.history[tabId] ?? [];
+      const nextHistory = {
+        ...cur.history,
+        [tabId]: stack.slice(0, -1),
+      };
+      switch (op.k) {
+        case "update": {
+          return {
+            ...mutate(cur, tabId, (cs) => {
+              const updates = { ...cs.updates };
+              if (op.prev === undefined) delete updates[op.key];
+              else updates[op.key] = op.prev;
+              return { ...cs, updates };
+            }),
+            history: nextHistory,
+          };
+        }
+        case "removeUpdate":
+          return {
+            ...mutate(cur, tabId, (cs) => ({
+              ...cs,
+              updates: { ...cs.updates, [op.key]: op.prev },
+            })),
+            history: nextHistory,
+          };
+        case "insert":
+          return {
+            ...mutate(cur, tabId, (cs) => ({
+              ...cs,
+              inserts: cs.inserts.filter((r) => r.id !== op.id),
+            })),
+            history: nextHistory,
+          };
+        case "removeInsert":
+          return {
+            ...mutate(cur, tabId, (cs) => ({
+              ...cs,
+              inserts: [...cs.inserts, op.row],
+            })),
+            history: nextHistory,
+          };
+        case "insertValue":
+          return {
+            ...mutate(cur, tabId, (cs) => ({
+              ...cs,
+              inserts: cs.inserts.map((r) => {
+                if (r.id !== op.id) return r;
+                const values = { ...r.values };
+                if (op.prev === undefined) delete values[op.column];
+                else values[op.column] = op.prev;
+                return { ...r, values };
+              }),
+            })),
+            history: nextHistory,
+          };
+        case "deleteToggle":
+          return {
+            ...mutate(cur, tabId, (cs) => {
+              const deletes = new Set(cs.deletes);
+              if (deletes.has(op.rowIndex)) deletes.delete(op.rowIndex);
+              else deletes.add(op.rowIndex);
+              return { ...cs, deletes };
+            }),
+            history: nextHistory,
+          };
+        case "clear":
+          return {
+            ...mutate(cur, tabId, () => op.snapshot),
+            history: nextHistory,
+          };
+      }
+    });
+  },
 }));
+
+/** Structural-ish equality for skipping no-op edits in the history. */
+function sameScalarLike(a: RowValue, b: RowValue): boolean {
+  if (a === b) return true;
+  if (typeof a === "object" && typeof b === "object" && a !== null && b !== null) {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Imperative helpers

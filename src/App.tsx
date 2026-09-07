@@ -53,7 +53,14 @@ function EditorArea() {
     <div className="flex h-full min-h-0 flex-col">
       <TabsBar />
       <div className="min-h-0 flex-1 overflow-hidden bg-background">
-        {active ? <TabContent key={active.id} tab={active} /> : <NoTabsPlaceholder />}
+        {/* Tab bodies remount per switch (key); a short fade softens the swap. */}
+        {active ? (
+          <div key={active.id} className="h-full animate-in fade-in-0 duration-150">
+            <TabContent tab={active} />
+          </div>
+        ) : (
+          <NoTabsPlaceholder />
+        )}
       </div>
     </div>
   );

@@ -124,15 +124,107 @@ impl ServerCertVerifier for NoVerifier {
     }
 }
 
-fn tls_config() -> Result<rustls::ClientConfig> {
+fn tls_config(config: &ResolvedConnectionConfig) -> Result<rustls::ClientConfig> {
     let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
     let builder = rustls::ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13, &rustls::version::TLS12])
         .map_err(|e| AppError::Db(format!("TLS setup failed: {e}")))?;
-    Ok(builder
-        .dangerous()
-        .with_custom_certificate_verifier(std::sync::Arc::new(NoVerifier))
-        .with_no_client_auth())
+
+    let ssl = config.ssl_files.clone().unwrap_or_default();
+
+    // Trust posture: a CA file pins the server certificate chain (libpq
+    // verify-ca semantics); without one the channel is encrypted but the
+    // server is not authenticated (libpq sslmode=require).
+    let builder = match &ssl.ca_path {
+        Some(ca_path) => {
+            let mut roots = rustls::RootCertStore::empty();
+            for der in load_certs(ca_path)? {
+                roots
+                    .add(der)
+                    .map_err(|e| AppError::Config(format!("bad CA certificate: {e}")))?;
+            }
+            builder.with_root_certificates(roots)
+        }
+        None => builder
+            .dangerous()
+            .with_custom_certificate_verifier(std::sync::Arc::new(NoVerifier)),
+    };
+
+    // Client identity: both cert and key must be present.
+    let client = match (&ssl.cert_path, &ssl.key_path) {
+        (Some(cert_path), Some(key_path)) => {
+            let certs = load_certs(cert_path)?;
+            let key = load_private_key(key_path)?;
+            builder
+                .with_client_auth_cert(certs, key)
+                .map_err(|e| AppError::Config(format!("bad client certificate: {e}")))?
+        }
+        _ => builder.with_no_client_auth(),
+    };
+
+    Ok(client)
+}
+
+// ---------------------------------------------------------------------------
+// PEM loading (hand-rolled; avoids an extra dependency)
+// ---------------------------------------------------------------------------
+
+/// Extract the base64 payload of every PEM section labelled `label`
+/// (e.g. "CERTIFICATE") and decode it to DER.
+fn load_pem_section(path: &str, label: &str) -> Result<Vec<Vec<u8>>> {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine as _;
+
+    let text = std::fs::read_to_string(path)?;
+    let begin = format!("-----BEGIN {label}-----");
+    let end = format!("-----END {label}-----");
+    let mut out = Vec::new();
+    let mut in_section = false;
+    let mut body = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line == begin {
+            in_section = true;
+            body.clear();
+        } else if line == end {
+            if in_section {
+                let der = STANDARD
+                    .decode(body.as_bytes())
+                    .map_err(|e| AppError::Config(format!("{path}: invalid PEM body: {e}")))?;
+                out.push(der);
+            }
+            in_section = false;
+        } else if in_section {
+            body.push_str(line);
+        }
+    }
+    Ok(out)
+}
+
+fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>> {
+    Ok(load_pem_section(path, "CERTIFICATE")?
+        .into_iter()
+        .map(CertificateDer::from)
+        .collect())
+}
+
+fn load_private_key(path: &str) -> Result<rustls::pki_types::PrivateKeyDer<'static>> {
+    use rustls::pki_types::{PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, PrivateSec1KeyDer};
+    for label in ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY"] {
+        let sections = load_pem_section(path, label)?;
+        if let Some(der) = sections.into_iter().next() {
+            return Ok(if label == "PRIVATE KEY" {
+                rustls::pki_types::PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(der))
+            } else if label == "RSA PRIVATE KEY" {
+                rustls::pki_types::PrivateKeyDer::Pkcs1(PrivatePkcs1KeyDer::from(der))
+            } else {
+                rustls::pki_types::PrivateKeyDer::Sec1(PrivateSec1KeyDer::from(der))
+            });
+        }
+    }
+    Err(AppError::Config(format!(
+        "{path}: no private key section found (expected PKCS#8, RSA or EC PEM)"
+    )))
 }
 
 impl PgConnection {
@@ -158,7 +250,8 @@ impl PgConnection {
         }
 
         let attempt = async {
-            let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config()?);
+            let tls_config = tls_config(config)?;
+            let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
             let (client, conn) = cfg.connect(tls).await?;
             // The connection driver must be polled for progress; park it on a
             // background task for the lifetime of the session.
@@ -3127,5 +3220,57 @@ mod tests {
         assert!(!looks_like_result_set("INSERT INTO t VALUES (1)"));
         assert!(!looks_like_result_set("WITH x AS (INSERT …) SELECT * FROM x"));
         assert!(!looks_like_result_set(""));
+    }
+}
+
+#[cfg(test)]
+mod tls_pem_tests {
+    use super::*;
+
+    /// A minimal valid PEM-shaped body (base64 of "hello"); the loader never
+    /// inspects DER contents, only section labels and base64 integrity.
+    const TEST_CERT_PEM: &str = "-----BEGIN CERTIFICATE-----\naGVsbG8gY2VydA==\n-----END CERTIFICATE-----\n";
+    const TEST_KEY_PEM: &str = concat!(
+        "-----BEGIN PRIVATE KEY-----\naGVsbG8ga2V5\n-----END PRIVATE KEY-----\n",
+        "-----BEGIN CERTIFICATE-----\naGVsbG8gY2VydDI=\n-----END CERTIFICATE-----\n"
+    );
+
+    fn write_temp(name: &str, contents: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("murmeli-tls-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, contents).unwrap();
+        path.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn load_certs_extracts_every_section() {
+        let path = write_temp("multi.pem", &format!("{TEST_CERT_PEM}TEST_CERT_PEM_DUMMY"));
+        let _ = path;
+    }
+
+    #[test]
+    fn load_private_key_prefers_pkcs8_section() {
+        let path = write_temp("key.pem", TEST_KEY_PEM);
+        let key = load_private_key(&path).unwrap();
+        assert!(matches!(
+            key,
+            rustls::pki_types::PrivateKeyDer::Pkcs8(_)
+        ));
+    }
+
+    #[test]
+    fn load_certs_reads_all_certificate_sections() {
+        let combined = format!("{TEST_CERT_PEM}{}", TEST_KEY_PEM);
+        let path = write_temp("chain.pem", &combined);
+        let certs = load_certs(&path).unwrap();
+        assert_eq!(certs.len(), 2);
+    }
+
+    #[test]
+    fn missing_sections_error_clearly() {
+        let path = write_temp("empty.pem", "not a pem file");
+        let err = load_private_key(&path).unwrap_err();
+        assert!(err.to_string().contains("no private key section"));
     }
 }

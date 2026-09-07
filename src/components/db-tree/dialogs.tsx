@@ -23,18 +23,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { dbKeys } from "@/lib/db-queries";
+import { TREE_STALE_TIME, dbKeys, fetchDatabases } from "@/lib/db-queries";
 import {
+  bulkAlterTables,
   dropObjects,
   emptyCloneTable,
   renameTable,
   runMaintenance,
   truncateTables,
 } from "@/lib/object-queries";
+import { CHARSETS, ENGINES } from "@/components/designer/column-utils";
 import type { MaintenanceOp, MaintenanceResult, ObjectOpResult } from "@/types/ipc";
 
 import { useConnectionStore } from "@/stores/connection";
 import { notify } from "@/lib/toast";
+import { log } from "@/stores/log";
 
 import { CopyTableDialog } from "./CopyTableDialog";
 import { useTreeDialogsStore } from "./tree-dialogs-store";
@@ -62,6 +65,7 @@ export function TreeDialogs() {
       <MaintenanceDialog />
       <PromptDialog />
       <CopyTableDialog />
+      <BulkAlterDialog />
     </>
   );
 }
@@ -426,6 +430,251 @@ function PromptDialog() {
             {busy && <Spinner data-icon="inline-start" />}
             {prompt.kind === "rename" ? "Rename" : "Create copy"}
           </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bulk table editor (MySQL/MariaDB parity): move + engine/charset/collation
+// ---------------------------------------------------------------------------
+
+/** Sentinel for "leave this property as-is" in the selects. */
+const KEEP = "(keep)";
+
+function BulkAlterDialog() {
+  const request = useTreeDialogsStore((s) => s.bulkAlter);
+  const closeAll = useTreeDialogsStore((s) => s.closeAll);
+  const connId = useConnectionStore((s) => s.connId);
+  const dialect = useConnectionStore((s) => s.serverInfo?.dialect);
+  const queryClient = useQueryClient();
+
+  const tables = useTablesFromCache(connId ?? -1, request?.db ?? "");
+  // Proper query (not a cache peek): after a fresh connect the tree cache may
+  // not hold the database list yet.
+  const databases = useQuery({
+    queryKey: dbKeys.databases(connId ?? -1),
+    queryFn: () => fetchDatabases(connId!),
+    enabled: connId !== null,
+    staleTime: TREE_STALE_TIME,
+  });
+  const databaseNames = (databases.data ?? []).map((d) => d.name);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [newDb, setNewDb] = useState("");
+  const [engine, setEngine] = useState("");
+  const [charset, setCharset] = useState("");
+  const [collation, setCollation] = useState("");
+  const [results, setResults] = useState<ObjectOpResult[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setSelected(new Set());
+    setNewDb("");
+    setEngine("");
+    setCharset("");
+    setCollation("");
+    setResults(null);
+    setBusy(false);
+  }, [request]);
+
+  if (!request || connId === null) return null;
+  const mysql = dialect === undefined || dialect === "mysql";
+  const hasChange = newDb !== "" || engine !== "" || charset !== "" || collation !== "";
+  const canApply = mysql && selected.size > 0 && hasChange && !busy;
+
+  const apply = () => {
+    setBusy(true);
+    const requests = [...selected].map((table) => ({
+      table,
+      newDb: newDb || null,
+      engine: engine || null,
+      charset: charset || null,
+      collation: collation || null,
+    }));
+    bulkAlterTables(connId, request.db, requests)
+      .then((res) => {
+        setResults(res);
+        const okCount = res.filter((r) => r.ok).length;
+        if (okCount === res.length) {
+          notify.success(`Bulk alter: ${okCount} table(s) updated.`);
+        } else {
+          notify.warning(`Bulk alter: ${okCount} updated, ${res.length - okCount} failed.`);
+        }
+        for (const r of res) {
+          if (!r.ok) log("error", `Bulk alter \`${r.name}\` failed: ${r.error}`);
+        }
+        void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, request.db) });
+        if (newDb) {
+          void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, newDb) });
+        }
+      })
+      .catch((err) =>
+        notify.error(`Bulk alter failed: ${err instanceof Error ? err.message : String(err)}`),
+      )
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <AlertDialog open onOpenChange={(open) => !open && closeAll()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Bulk table editor</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div>
+              Move selected tables to another database and/or change engine,
+              character set and collation in one pass
+              {mysql ? "." : " — available on MySQL/MariaDB connections."}
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        {results ? (
+          <ul className="flex max-h-64 flex-col gap-1 overflow-auto rounded-md border p-2">
+            {results.map((r) => (
+              <li key={r.name} className="flex items-center gap-1.5 text-xs">
+                {r.ok ? (
+                  <Check className="size-3.5 text-success" />
+                ) : (
+                  <TriangleAlert className="size-3.5 text-destructive" />
+                )}
+                <span className="font-mono">{r.name}</span>
+                {!r.ok && <span className="text-destructive">{r.error}</span>}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">
+                Tables ({selected.size}/{tables.length} selected)
+              </p>
+              <div className="flex max-h-40 flex-col gap-0.5 overflow-auto rounded-md border p-2">
+                {tables.map((name) => (
+                  <div
+                    key={name}
+                    role="checkbox"
+                    aria-checked={selected.has(name)}
+                    tabIndex={0}
+                    onClick={() => {
+                      const next = new Set(selected);
+                      if (next.has(name)) next.delete(name);
+                      else next.add(name);
+                      setSelected(next);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        const next = new Set(selected);
+                        if (next.has(name)) next.delete(name);
+                        else next.add(name);
+                        setSelected(next);
+                      }
+                    }}
+                    className="flex cursor-pointer items-center gap-2 py-0.5 text-xs hover:bg-accent/60"
+                  >
+                    {/* Visual only — the row owns the click so it never double-fires. */}
+                    <Checkbox
+                      checked={selected.has(name)}
+                      tabIndex={-1}
+                      className="pointer-events-none"
+                    />
+                    <span className="font-mono">{name}</span>
+                  </div>
+                ))}
+                {tables.length === 0 && (
+                  <p className="py-1 text-xs text-muted-foreground">No base tables.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field>
+                <FieldLabel className="text-xs text-muted-foreground">Move to database</FieldLabel>
+                <Select
+                  value={newDb || KEEP}
+                  onValueChange={(v) => setNewDb(v === KEEP ? "" : v)}
+                >
+                  <SelectTrigger size="sm" aria-label="Move to database">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={KEEP} className="text-xs">
+                      (keep)
+                    </SelectItem>
+                    {databaseNames
+                      .filter((d) => d !== request.db)
+                      .map((d) => (
+                        <SelectItem key={d} value={d} className="text-xs">
+                          {d}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel className="text-xs text-muted-foreground">Engine</FieldLabel>
+                <Select
+                  value={engine || KEEP}
+                  onValueChange={(v) => setEngine(v === KEEP ? "" : v)}
+                >
+                  <SelectTrigger size="sm" aria-label="Engine">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={KEEP} className="text-xs">
+                      (keep)
+                    </SelectItem>
+                    {ENGINES.map((e) => (
+                      <SelectItem key={e} value={e} className="text-xs">
+                        {e}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel className="text-xs text-muted-foreground">Character set</FieldLabel>
+                <Select
+                  value={charset || KEEP}
+                  onValueChange={(v) => setCharset(v === KEEP ? "" : v)}
+                >
+                  <SelectTrigger size="sm" aria-label="Character set">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={KEEP} className="text-xs">
+                      (keep)
+                    </SelectItem>
+                    {CHARSETS.map((c) => (
+                      <SelectItem key={c} value={c} className="text-xs">
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel className="text-xs text-muted-foreground">Collation</FieldLabel>
+                <Input
+                  value={collation}
+                  placeholder="(keep)"
+                  onChange={(e) => setCollation(e.target.value)}
+                  className="h-7 font-mono text-xs"
+                />
+              </Field>
+            </div>
+          </div>
+        )}
+
+        <AlertDialogFooter>
+          <AlertDialogCancel>{results ? "Close" : "Cancel"}</AlertDialogCancel>
+          {!results && (
+            <Button disabled={!canApply} onClick={apply}>
+              {busy && <Spinner data-icon="inline-start" />}
+              Apply to {selected.size} table{selected.size === 1 ? "" : "s"}
+            </Button>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

@@ -9,6 +9,7 @@
 use tauri::{AppHandle, State};
 
 use crate::connections::manager::ConnectionManager;
+use crate::connections::dialect::SqlDialect;
 use crate::connections::{
     AlterUserRequest, CreateUserRequest, FindTextRequest, GrantDetail, GrantRequest,
     ProcessInfo, ServerVariable, StatusVariable, UserMeta,
@@ -111,6 +112,67 @@ pub async fn variables_list(
     connections.list_variables(conn_id).await
 }
 
+/// Validate a system-variable identifier (SET GLOBAL target). Only plain
+/// identifiers are accepted — this doubles as injection defense.
+fn valid_variable_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Escape a literal value for single-quoted SQL string context.
+fn quote_sql_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for c in value.chars() {
+        match c {
+            '\'' => out.push_str("\\'"),
+            '\\' => out.push_str("\\\\"),
+            _ => out.push(c),
+        }
+    }
+    out.push('\'');
+    out
+}
+
+/// Apply `SET GLOBAL name = value` (MySQL/MariaDB). Other engines have no
+/// equivalent single-statement mechanism (PostgreSQL needs ALTER SYSTEM +
+/// reload), so they report an explicit unsupported error.
+#[tauri::command]
+pub async fn server_set_variable(
+    connections: State<'_, ConnectionManager>,
+    conn_id: u32,
+    name: String,
+    value: String,
+) -> Result<()> {
+    if !valid_variable_name(&name) {
+        return Err(AppError::Config(format!(
+            "invalid variable name: {name}"
+        )));
+    }
+    let dialect = connections.server_info(conn_id).await?.dialect;
+    let sql = match dialect {
+        SqlDialect::Mysql => {
+            format!(
+                "SET GLOBAL {} = {}",
+                name,
+                quote_sql_string(&value)
+            )
+        }
+        SqlDialect::Postgres | SqlDialect::Sqlite => {
+            return Err(AppError::Config(
+                "server variable editing is a MySQL/MariaDB feature".into(),
+            ));
+        }
+    };
+    let outcomes = connections.run_script(conn_id, sql.clone(), true).await?;
+    if let Some(message) = first_error_message(&outcomes) {
+        return Err(AppError::Db(format!("{message} — in: {sql}")));
+    }
+    Ok(())
+}
+
 /// Status counters since server start.
 #[tauri::command]
 pub async fn status_list(
@@ -143,4 +205,41 @@ pub async fn find_text_start(
 #[tauri::command]
 pub fn find_text_cancel(id: u32) -> bool {
     find_text::find_request_cancel(id)
+}
+
+fn first_error_message(outcomes: &[crate::connections::QueryOutcome]) -> Option<String> {
+    outcomes.iter().find_map(|o| match o {
+        crate::connections::QueryOutcome::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    })
+}
+
+#[cfg(test)]
+mod server_variable_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_plain_identifiers() {
+        assert!(valid_variable_name("max_connections"));
+        assert!(valid_variable_name("innodb_buffer_pool_size"));
+        assert!(valid_variable_name("SQL_MODE"));
+        assert!(valid_variable_name("x1_2"));
+    }
+
+    #[test]
+    fn rejects_injection_and_empty_names() {
+        assert!(!valid_variable_name(""));
+        assert!(!valid_variable_name("x; DROP TABLE users"));
+        assert!(!valid_variable_name("a-b"));
+        assert!(!valid_variable_name("`x`"));
+        assert!(!valid_variable_name("x'y"));
+    }
+
+    #[test]
+    fn escapes_quotes_and_backslashes_in_values() {
+        assert_eq!(quote_sql_string("500"), "'500'");
+        assert_eq!(quote_sql_string("o'clock"), "'o\\'clock'");
+        assert_eq!(quote_sql_string("a\\b"), "'a\\\\b'");
+        assert_eq!(quote_sql_string(""), "''");
+    }
 }
