@@ -4,6 +4,11 @@
 
 <h1 align="center">DBobcat</h1>
 
+<p align="center">
+  <a href="https://github.com/AamiRobin/dbobcat/actions/workflows/ci.yml"><img src="https://github.com/AamiRobin/dbobcat/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+</p>
+
 DBobcat (**d**atabase + bobcat) is an open-source, cross-platform database GUI client for MySQL/MariaDB, PostgreSQL, and SQLite — inspired by [HeidiSQL](https://www.heidisql.com/), built with a modern stack.
 
 Repository: <https://github.com/AamiRobin/dbobcat>
