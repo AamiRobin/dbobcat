@@ -77,8 +77,10 @@ jobs:
             echo "::error::Placeholder missing in src-tauri/tauri.updater.conf.json."
             exit 1
           fi
-          # '|' delimiter: base64 minisign keys may contain '/' but never '|'
-          sed -i "s|__TAURI_UPDATER_PUBLIC_KEY__|${TAURI_UPDATER_PUBLIC_KEY}|" src-tauri/tauri.updater.conf.json
+          # '|' delimiter: base64 minisign keys may contain '/' but never '|'.
+          # The .bak suffix keeps -i portable across GNU and BSD sed.
+          sed -i.bak "s|__TAURI_UPDATER_PUBLIC_KEY__|${TAURI_UPDATER_PUBLIC_KEY}|" src-tauri/tauri.updater.conf.json
+          rm src-tauri/tauri.updater.conf.json.bak
 
       # Signing key material is scoped to this step only — never echoed,
       # never exported for the rest of the job.
