@@ -27,6 +27,8 @@ import {
   useTransactionStore,
 } from "@/stores/transaction";
 import { useTabsStore } from "@/stores/tabs";
+import { useStarPromptStore } from "@/stores/star-prompt";
+import { StarPromptDialog } from "@/components/layout/StarPromptDialog";
 
 // Heavy global dialogs load on demand (Phase 8 bundle hygiene); their open
 // state lives in stores, so a not-yet-loaded dialog simply renders nothing.
@@ -127,6 +129,7 @@ export default function App() {
       log("info", `DBobcat v${__APP_VERSION__} started.`);
       void checkBackend();
       restoreTabs();
+      useStarPromptStore.getState().recordLaunch();
     }
     // Listeners/subscriptions are per-effect-cycle so StrictMode's
     // unmount→remount pair always leaves exactly one of each installed.
@@ -185,6 +188,7 @@ export default function App() {
         </Suspense>
         <ShortcutsDialog />
         <AboutDialog />
+        <StarPromptDialog />
         {/* Action-feedback toasts (theme synced via the ui store) */}
         <Toaster position="bottom-right" />
       </div>

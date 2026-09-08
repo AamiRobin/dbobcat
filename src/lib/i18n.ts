@@ -242,6 +242,13 @@ export const en = {
   "about.credits": "Inspired by HeidiSQL — thanks for a decade of ideas.",
   "about.repository": "Project homepage",
 
+  // Star prompt (launch milestone)
+  "star.title": "Star DBobcat on GitHub",
+  "star.description":
+    "If DBobcat has been useful to you, a star on GitHub helps other people find it.",
+  "star.action": "Star on GitHub",
+  "star.later": "Maybe later",
+
   // Action-feedback toasts (sonner)
   "toast.copied": "Copied “{name}” to clipboard",
   "toast.export.finished": "Export finished — {bytes} written to {file}",
