@@ -1,6 +1,6 @@
 [package]
 name = "dbobcat"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 description = "DBobcat — open-source, cross-platform database GUI client"
 authors = ["Amir Robin"]
 edition = "2021"

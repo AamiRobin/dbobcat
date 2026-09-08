@@ -3,7 +3,7 @@
 Notable changes to DBobcat. Formats follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.1.0-alpha.2] — 2026-09-08
+## [0.1.0-alpha.3] — 2026-09-08
 
 First public alpha — a cross-platform database GUI client for
 MySQL/MariaDB, PostgreSQL, and SQLite, inspired by HeidiSQL.
@@ -41,4 +41,4 @@ MySQL/MariaDB, PostgreSQL, and SQLite, inspired by HeidiSQL.
 - Alpha quality — expect rough edges. Nothing is sent anywhere: all data
   stays on your machine.
 
-[0.1.0-alpha.2]: https://github.com/AamiRobin/dbobcat/releases/tag/v0.1.0-alpha.2
+[0.1.0-alpha.3]: https://github.com/AamiRobin/dbobcat/releases/tag/v0.1.0-alpha.3
