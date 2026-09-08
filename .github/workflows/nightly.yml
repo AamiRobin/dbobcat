@@ -39,6 +39,9 @@ jobs:
       - name: Install bun (frontend build tooling)
         uses: oven-sh/setup-bun@v2
 
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
@@ -50,6 +53,8 @@ jobs:
 
       - name: Rust build cache
         uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri"
 
       - name: Build and attach to the nightly release
         uses: tauri-apps/tauri-action@v0
