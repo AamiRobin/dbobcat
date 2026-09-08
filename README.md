@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/dbobcat-1024.png" alt="DBobcat logo — a tufted bobcat perched atop its den, drawn as a database cylinder" height="120">
+  <img src="assets/brand/dbobcat-app-icon.png" alt="DBobcat logo — a tufted bobcat perched atop its den, drawn as a database cylinder" height="120">
 </p>
 
 <h1 align="center">DBobcat</h1>
