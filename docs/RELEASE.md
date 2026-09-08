@@ -67,7 +67,8 @@ git push origin v0.1.0-rc.1
 2. The `publish` job creates the GitHub Release and uploads:
    - Linux: `.AppImage` + `.deb` + updater manifest fragment
    - macOS: `.app.tar.gz` (signed) + `.dmg`
-   - Windows: `-setup.exe` (NSIS, signed) + `.msi`
+   - Windows: `-setup.exe` (NSIS, signed) — no MSI, whose numeric-only
+     version field cannot carry semver prerelease identifiers
    - `latest.json` (merged from per-platform fragments)
 3. Sanity-check `latest.json` in the release:
    `https://github.com/AamiRobin/dbobcat/releases/latest/download/latest.json`

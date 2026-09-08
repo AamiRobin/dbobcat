@@ -28,12 +28,17 @@ jobs:
             target: x86_64-unknown-linux-gnu
             # Updater platform key in latest.json (derived from the target triple).
             platform: linux-x86_64
+            bundles: deb,appimage
           - os: macos-latest
             target: aarch64-apple-darwin
             platform: darwin-aarch64
+            bundles: app,dmg
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             platform: windows-x86_64
+            # nsis only: the msi target cannot represent semver prerelease
+            # identifiers (its product version is numeric-only).
+            bundles: nsis
 
     steps:
       - name: Checkout
@@ -88,7 +93,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: bun run tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json
+        run: bun run tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.updater.conf.json
 
       # Emit this platform's slice of the Tauri v2 updater manifest. The
       # merged file is assembled by the publish job.
