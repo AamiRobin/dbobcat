@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
@@ -481,11 +481,24 @@ export function SessionManagerDialog({
   const busy =
     saveMutation.isPending || deleteMutation.isPending || testMutation.isPending || connecting;
 
+  const panelRef = useRef<HTMLDivElement>(null);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Responsive height: fill on small viewports, cap on tall ones so the
           two-pane grid (min-h-0) scrolls instead of leaving a blank strip. */}
-      <DialogContent className="flex h-[min(640px,90dvh)] max-w-3xl flex-col gap-0 p-0 sm:max-w-3xl">
+      <DialogContent
+        ref={panelRef}
+        tabIndex={-1}
+        onOpenAutoFocus={(event) => {
+          // The first tabbable element is the Import button, and Radix
+          // tooltips open on focus — landing focus there pops its tooltip
+          // on every open. Focus the panel instead.
+          event.preventDefault();
+          panelRef.current?.focus();
+        }}
+        className="flex h-[min(640px,90dvh)] max-w-3xl flex-col gap-0 p-0 sm:max-w-3xl"
+      >
         <DialogHeader className="border-b px-4 py-3">
           <DialogTitle>{t("session.title")}</DialogTitle>
           <DialogDescription>{t("session.description")}</DialogDescription>
