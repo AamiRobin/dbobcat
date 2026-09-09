@@ -23,6 +23,8 @@ Repository: <https://github.com/AamiRobin/dbobcat>
 - **Server tools** — user manager, process list, find text across tables, copy table
 - **Schema diagram** — auto-laid-out ER view of a database with export to SVG/PNG
 - **Command palette** (Mod+K), SQL snippets, per-connection transaction defaults
+- **AI assistant** (opt-in, Mod+I) — natural language → SQL, fix-my-query, and explanations against any OpenAI-compatible provider (including local Ollama/LM Studio). Schema metadata only is shared — never row data
+- **MCP server** (`dbobcat mcp`) — let Claude Code, Cursor, or any MCP client query your allowlisted connections read-only; [docs](docs/MCP.md)
 - Multi-engine via a driver abstraction (one tokio task per connection)
 
 ## Tech stack

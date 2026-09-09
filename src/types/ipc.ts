@@ -935,3 +935,52 @@ export interface GrantRequest {
   grantOption: boolean;
   revoke: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// AI assistant (Phase 12)
+// ---------------------------------------------------------------------------
+
+/** What the assistant is asked to do (mirrors `ai::AiMode`). */
+export type AiMode = "generate" | "fix" | "explain" | "test";
+
+/**
+ * Endpoint + model configured in AI settings. The base URL includes the
+ * version segment (OpenAI-compatible chat-completions schema).
+ *
+ * Non-secret on purpose: this crosses IPC as plain arguments. The API key
+ * lives only in the encrypted credential store, read backend-side at
+ * request time — it never enters webview state.
+ */
+export interface AiProviderConfig {
+  baseUrl: string;
+  model: string;
+}
+
+/** One assistant job (mirrors `ai::AiJob`); modes document what they read. */
+export interface AiJob {
+  mode: AiMode;
+  /** SQL family of the connection: "mysql" | "postgresql" | "sqlite". */
+  dialect: string;
+  database?: string | null;
+  /** Serialized schema text (metadata only — never row data). */
+  schema?: string | null;
+  prompt?: string | null;
+  sql?: string | null;
+  error?: string | null;
+}
+
+/** Incremental text delta streamed while a job runs. */
+export interface AiStreamEvent {
+  delta: string;
+}
+
+export interface AiRunResult {
+  text: string;
+  model: string;
+}
+
+/** Whether an API key is stored, plus a masked hint for the settings UI. */
+export interface AiKeyStatus {
+  hasKey: boolean;
+  hint?: string | null;
+}

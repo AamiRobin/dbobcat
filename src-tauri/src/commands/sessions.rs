@@ -138,7 +138,7 @@ fn write_sessions(app: &AppHandle, sessions: &[SavedSession]) -> Result<()> {
 /// Build driver parameters from a session plus stored secrets. When
 /// `password_override` is set (Test dialog with unsaved input) it takes
 /// precedence over the credential store.
-fn resolve_config(
+pub(crate) fn resolve_config(
     session: &SavedSession,
     credentials: &CredentialStore,
     password_override: Option<&str>,

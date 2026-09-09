@@ -211,6 +211,22 @@ function runActiveQuery(kind: RunKind): void {
 }
 
 // ---------------------------------------------------------------------------
+// AI bar focus bridge (same latest-wins pattern as the query runner)
+// ---------------------------------------------------------------------------
+
+type AiBarFocus = () => void;
+
+let aiBarFocus: AiBarFocus | null = null;
+
+/**
+ * Called by the active QueryView's AI bar on mount so Mod+I focuses its
+ * input from anywhere, including inside the CodeMirror editor.
+ */
+export function setAiBarFocus(focus: AiBarFocus | null): void {
+  aiBarFocus = focus;
+}
+
+// ---------------------------------------------------------------------------
 // Actions (shared by keyboard registry and native-menu clicks)
 // ---------------------------------------------------------------------------
 
@@ -504,6 +520,20 @@ export const SHORTCUTS: ShortcutDef[] = [
     group: "Query",
     handler: async () => {
       await dispatchAction("query.run-selection");
+    },
+  },
+  {
+    id: "shortcut.ai.ask",
+    combos: ["Mod+I"],
+    label: "Ask the AI assistant",
+    group: "Query",
+    fireInEditor: true,
+    handler: async () => {
+      if (!aiBarFocus) {
+        log("info", "No query tab is open — create one with Ctrl+T.");
+        return;
+      }
+      aiBarFocus();
     },
   },
 

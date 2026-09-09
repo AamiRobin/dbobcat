@@ -3,6 +3,29 @@
 Notable changes to DBobcat. Formats follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **MCP server (`dbobcat mcp`)** — exposes allowlisted DBobcat connections to
+  MCP-capable agents (Claude Code, Cursor, …) over stdio, from the same
+  binary as the app. Six read-only tools (connections, databases, tables,
+  table details, compact schema context, single-statement query) with a
+  fail-closed policy: explicit per-session allowlist, a read-only SQL
+  classifier (rejects writes, data-modifying CTEs, `FOR UPDATE`,
+  `EXPLAIN ANALYZE`, `SELECT … INTO OUTFILE`, stacked statements), and hard
+  row/cell/result caps. Policy is edited in Settings → AI → Agent access and
+  re-read on every request.
+- **AI assistant (BYOK)** — a prompt bar above the query editor (`Mod+I`).
+  Natural language → SQL drafts built from the real schema, one-click
+  "fix with AI" for failed statements, and plain-English query
+  explanations. Works with any OpenAI-compatible endpoint (OpenAI,
+  OpenRouter, Groq, …) including fully local Ollama and LM Studio.
+  Privacy contract: only schema metadata and your SQL ever leave the app
+  — never row data — the API key is stored in the same AES-GCM vault as
+  connection passwords, and the assistant stays off until you explicitly
+  configure and enable it.
+
 ## [0.1.0-alpha.3] — 2026-09-08
 
 First public alpha — a cross-platform database GUI client for

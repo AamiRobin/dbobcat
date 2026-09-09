@@ -19,11 +19,13 @@
 #![allow(dead_code)]
 
 mod commands;
+pub mod ai;
 pub mod connections;
 mod credentials;
 mod error;
 mod export;
 mod find_text;
+pub mod mcp;
 mod settings;
 mod ssh;
 
@@ -86,6 +88,28 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Headless MCP server mode: `dbobcat mcp` never starts the GUI; it
+    // serves the Model Context Protocol over stdio until EOF. Branching
+    // here — before any Tauri builder work — keeps the desktop shell and
+    // its plugins out of the agent path entirely.
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if args.iter().any(|a| a == "mcp" || a == "--mcp") {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime for mcp mode");
+            let code = match rt.block_on(mcp::run_stdio()) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("dbobcat mcp: {e}");
+                    1
+                }
+            };
+            std::process::exit(code);
+        }
+    }
+
     commands::register_commands(
         tauri::Builder::default()
             // Single-instance MUST be registered first so a second launch
@@ -111,6 +135,7 @@ pub fn run() {
                 app.manage(SshTunnelManager::new());
                 app.manage(ConnectionManager::new());
                 app.manage(LaunchIntentState::new());
+                app.manage(ai::AiJobs::new());
 
                 // Windows/Linux: drop the native title bar so the app header
                 // carries Windows-style window controls on the right (see

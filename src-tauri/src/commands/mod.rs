@@ -11,6 +11,7 @@
 //! inside `generate_handler!` (tauri-apps/tauri#4919).
 
 pub mod app;
+pub mod ai;
 pub mod blob;
 pub mod data;
 pub mod diagram;
@@ -128,5 +129,12 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         diagram::dia_describe_tables,
         diagram::dia_list_foreign_keys,
         diagram::dia_export_file,
+        // AI assistant (Phase 12)
+        ai::ai_save_key,
+        ai::ai_key_status,
+        ai::ai_delete_key,
+        ai::ai_run,
+        ai::ai_test,
+        ai::ai_cancel,
     ])
 }

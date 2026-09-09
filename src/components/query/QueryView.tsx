@@ -19,6 +19,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { AiBar } from "@/components/ai/AiBar";
 import { QueryHelpersPanel } from "@/components/query/QueryHelpersPanel";
 import { QueryHistoryMenu } from "@/components/query/QueryHistoryMenu";
 import { QueryResults } from "@/components/query/QueryResults";
@@ -391,11 +392,32 @@ export function QueryView({ tab }: { tab: Tab }) {
     });
     view.focus();
   };
+  /** Whole-document replacement (AI draft "Replace editor" action). */
+  const replaceWholeDoc = (text: string) => {
+    const view = viewRef.current;
+    if (!view || !text) {
+      patch(tabId, { sql: text });
+      return;
+    }
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: text },
+      selection: { anchor: text.length },
+      scrollIntoView: true,
+    });
+    view.focus();
+  };
   const getEditorSelection = () => {
     const view = viewRef.current;
     if (!view) return "";
     return view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to);
   };
+
+  /** First error of the last run — feeds the AI bar's "Fix with AI". */
+  const lastErrorOutcome = useMemo(() => {
+    const error = qState.outcomes?.find((o) => o.kind === "error");
+    if (!error || error.kind !== "error") return null;
+    return { message: error.message, sql: error.sql ?? null };
+  }, [qState.outcomes]);
 
   const hasVisibleResultSet =
     activeResultSet != null &&
@@ -587,6 +609,16 @@ export function QueryView({ tab }: { tab: Tab }) {
               >
                 <ResizablePanel defaultSize={hasResults ? "55" : "100"} minSize="15" className="min-h-0">
                   <div className="flex h-full min-h-0 flex-col overflow-hidden">
+                    <AiBar
+                      connId={connId}
+                      db={db}
+                      dialect={dialect}
+                      lastError={lastErrorOutcome}
+                      insertText={insertAtCursorFromView}
+                      replaceDoc={replaceWholeDoc}
+                      getSelection={getEditorSelection}
+                      getDoc={() => viewRef.current?.state.doc.toString() ?? qState.sql}
+                    />
                     <SqlEditor
                       value={qState.sql}
                       onChange={(value) => patch(tabId, { sql: value })}

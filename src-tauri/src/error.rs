@@ -29,6 +29,12 @@ pub enum AppError {
     #[error("SSH error: {0}")]
     Ssh(String),
 
+    /// A user-requested cancellation (AI streams, future long jobs). The
+    /// frontend matches on the "cancelled: " prefix to stay quiet instead
+    /// of toasting an error.
+    #[error("cancelled: {0}")]
+    Cancelled(String),
+
     /// Feature that exists in the UI but has no implementation yet.
     #[error("Unsupported: {0}")]
     Unsupported(String),

@@ -48,6 +48,9 @@ const CommandPalette = lazy(() =>
 const TxAskDialog = lazy(() =>
   import("@/components/common/TxAskDialog").then((m) => ({ default: m.TxAskDialog })),
 );
+const AiSettingsDialog = lazy(() =>
+  import("@/components/ai/AiSettingsDialog").then((m) => ({ default: m.AiSettingsDialog })),
+);
 
 function EditorArea() {
   const tabs = useTabsStore((s) => s.tabs);
@@ -189,6 +192,9 @@ export default function App() {
         <ShortcutsDialog />
         <AboutDialog />
         <StarPromptDialog />
+        <Suspense fallback={null}>
+          <AiSettingsDialog />
+        </Suspense>
         {/* Action-feedback toasts (theme synced via the ui store) */}
         <Toaster position="bottom-right" />
       </div>
