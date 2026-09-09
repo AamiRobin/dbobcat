@@ -1,4 +1,4 @@
-import logoUrl from "@/assets/dbobcat-logo.png";
+import logoUrl from "@/assets/dbobcat-logo.webp";
 
 import { Button } from "@/components/ui/button";
 import {
