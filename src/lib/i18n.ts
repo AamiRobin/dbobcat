@@ -476,6 +476,7 @@ export const en = {
   "ai.mcp.empty": "No saved sessions yet.",
   "ai.mcp.noSelection": "No connections selected — agents can see nothing.",
   "ai.mcp.cliHint": "Point your client at: dbobcat mcp",
+  "ai.mcp.saveError": "Could not save agent-access policy",
 } as const;
 
 export type TKey = keyof typeof en;

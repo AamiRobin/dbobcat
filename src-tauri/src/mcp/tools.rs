@@ -76,16 +76,14 @@ impl McpCtx {
 
     /// Resolve `name_or_id` (session name or id) against the allowlist and
     /// open a fresh driver connection. `database` optionally overrides the
-    /// session's default database.
+    /// session's default database. Caller MUST [`close_quietly`] the driver
+    /// after use — dropping without `close()` leaks server-side connections.
     async fn open(
         &self,
         policy: &McpPolicy,
         name_or_id: &str,
         database: Option<&str>,
-    ) -> Result<(
-        crate::commands::sessions::SavedSession,
-        Box<dyn DbConnection>,
-    )> {
+    ) -> Result<Box<dyn DbConnection>> {
         let sessions = self.sessions()?;
         let session = sessions
             .iter()
@@ -119,8 +117,7 @@ impl McpCtx {
             config.port = info.local_port;
         }
 
-        let driver = open_driver(&config).await?;
-        Ok((session, driver))
+        open_driver(&config).await
     }
 }
 
@@ -218,33 +215,41 @@ async fn call_tool_inner(ctx: &McpCtx, name: &str, args: &Value) -> Result<Strin
         }
         "dbobcat_list_databases" => {
             let conn = require_arg(&arg("connection"), "connection")?;
-            let (_, mut driver) = ctx.open(&policy, &conn, None).await?;
-            let databases = driver.list_databases().await?;
-            Ok(pretty(&json!({ "databases": databases })))
+            let mut driver = ctx.open(&policy, &conn, None).await?;
+            let result = driver.list_databases().await;
+            close_quietly(&mut driver).await;
+            result.map(|databases| pretty(&json!({ "databases": databases })))
         }
         "dbobcat_list_tables" => {
             let conn = require_arg(&arg("connection"), "connection")?;
             let database = require_arg(&arg("database"), "database")?;
-            let (_, mut driver) = ctx.open(&policy, &conn, Some(&database)).await?;
-            let tables = driver.list_tables(&database).await?;
-            Ok(pretty(&json!({ "tables": tables })))
+            let mut driver = ctx.open(&policy, &conn, Some(&database)).await?;
+            let result = driver.list_tables(&database).await;
+            close_quietly(&mut driver).await;
+            result.map(|tables| pretty(&json!({ "tables": tables })))
         }
         "dbobcat_describe_table" => {
             let conn = require_arg(&arg("connection"), "connection")?;
             let database = require_arg(&arg("database"), "database")?;
             let table = require_arg(&arg("table"), "table")?;
-            let (_, mut driver) = ctx.open(&policy, &conn, Some(&database)).await?;
-            let columns = driver.describe_table(&database, &table).await?;
-            Ok(pretty(&json!({ "table": table, "columns": columns })))
+            let mut driver = ctx.open(&policy, &conn, Some(&database)).await?;
+            let result = driver.describe_table(&database, &table).await;
+            close_quietly(&mut driver).await;
+            result.map(|columns| pretty(&json!({ "table": table, "columns": columns })))
         }
         "dbobcat_get_schema_context" => {
             let conn = require_arg(&arg("connection"), "connection")?;
             let database = require_arg(&arg("database"), "database")?;
-            let (_, mut driver) = ctx.open(&policy, &conn, Some(&database)).await?;
-            let dialect = driver.server_info().dialect.wire_name();
-            let tables = driver.list_schema_columns(&database).await?;
-            let fks = driver.list_schema_foreign_keys(&database).await?;
-            Ok(build_schema_context(&database, dialect, &tables, &fks))
+            let mut driver = ctx.open(&policy, &conn, Some(&database)).await?;
+            let result = async {
+                let dialect = driver.server_info().dialect.wire_name();
+                let tables = driver.list_schema_columns(&database).await?;
+                let fks = driver.list_schema_foreign_keys(&database).await?;
+                Ok::<_, AppError>(build_schema_context(&database, dialect, &tables, &fks))
+            }
+            .await;
+            close_quietly(&mut driver).await;
+            result
         }
         "dbobcat_query" => {
             let conn = require_arg(&arg("connection"), "connection")?;
@@ -257,8 +262,10 @@ async fn call_tool_inner(ctx: &McpCtx, name: &str, args: &Value) -> Result<Strin
                     Ask the user to run write statements themselves in DBobcat.")));
             }
 
-            let (_, mut driver) = ctx.open(&policy, &conn, database.as_deref()).await?;
-            let outcomes = driver.run_script(&sql, true).await?;
+            let mut driver = ctx.open(&policy, &conn, database.as_deref()).await?;
+            let result = driver.run_script(&sql, true).await;
+            close_quietly(&mut driver).await;
+            let outcomes = result?;
 
             let mut statements = Vec::new();
             for outcome in outcomes {
@@ -304,6 +311,11 @@ fn require_arg(value: &Option<String>, name: &str) -> Result<String> {
         .clone()
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| AppError::Config(format!("missing required argument {name:?}")))
+}
+
+/// Graceful close; a failed close must not mask the tool's own result.
+async fn close_quietly(driver: &mut Box<dyn DbConnection>) {
+    let _ = driver.close().await;
 }
 
 fn pretty(v: &Value) -> String {

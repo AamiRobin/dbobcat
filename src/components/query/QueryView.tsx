@@ -618,6 +618,9 @@ export function QueryView({ tab }: { tab: Tab }) {
                       replaceDoc={replaceWholeDoc}
                       getSelection={getEditorSelection}
                       getDoc={() => viewRef.current?.state.doc.toString() ?? qState.sql}
+                      hasEditorSql={
+                        (viewRef.current?.state.doc.length ?? qState.sql.length) > 0
+                      }
                     />
                     <SqlEditor
                       value={qState.sql}

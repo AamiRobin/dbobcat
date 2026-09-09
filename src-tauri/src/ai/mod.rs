@@ -17,7 +17,7 @@
 //! cancelled via [`AiJobs`] while in flight.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -28,9 +28,16 @@ use crate::error::{AppError, Result};
 /// Credential-store entry holding the AI provider API key.
 pub const KEY_ENTRY_ID: &str = "ai";
 
+/// High bit distinguishing backend-minted job ids from frontend-minted
+/// ones, so the two id spaces can never collide.
+pub const JOB_ID_BACKEND_FLAG: u64 = 1 << 63;
+
 /// Per-request connect timeout. No overall timeout: completions stream for
 /// a long time by design, and hangs are handled by cancellation instead.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Per-read timeout on the streamed response (see `stream_chat`).
+const READ_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Low temperature: SQL drafting wants determinism, not creativity.
 const TEMPERATURE: f32 = 0.2;
@@ -251,16 +258,24 @@ pub async fn stream_chat(
     mut on_delta: impl FnMut(&str),
 ) -> Result<String> {
     let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
+    // `max_tokens` is the OpenAI-compatible staple; newer OpenAI models
+    // (o-series, gpt-5-class) reject it in favor of `max_completion_tokens`,
+    // so send both — OpenAI-compatible servers ignore unknown fields.
     let body = serde_json::json!({
         "model": config.model,
         "messages": messages,
         "stream": true,
         "temperature": TEMPERATURE,
         "max_tokens": max_tokens,
+        "max_completion_tokens": max_tokens,
     });
 
     let client = reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
+        // Per-read timeout: a provider that accepts and then stalls cannot
+        // hang the request forever. 120s is generous enough for reasoning
+        // models with long gaps between streamed chunks.
+        .read_timeout(READ_TIMEOUT)
         .build()
         .map_err(|e| AppError::Config(format!("cannot create HTTP client: {e}")))?;
 
@@ -388,15 +403,22 @@ fn truncate(s: &str, max: usize) -> String {
 // ---------------------------------------------------------------------------
 
 /// Registry of in-flight AI jobs. The frontend mints the job id so it can
-/// cancel a request it started without a round-trip.
+/// cancel a request it started without a round-trip; backend-initiated jobs
+/// (settings "test") mint their own via [`AiJobs::mint`].
 #[derive(Default)]
 pub struct AiJobs {
+    next_id: AtomicU64,
     active: Mutex<HashMap<u64, Arc<AtomicBool>>>,
 }
 
 impl AiJobs {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Fresh unique id for a backend-initiated job.
+    pub fn mint(&self) -> u64 {
+        self.next_id.fetch_add(1, Ordering::Relaxed) | JOB_ID_BACKEND_FLAG
     }
 
     /// Record a job; returns its cancellation flag.

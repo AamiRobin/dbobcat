@@ -120,20 +120,26 @@ const INTERNAL_ERROR: i64 = -32603;
 
 async fn dispatch(ctx: &McpCtx, method: &str, params: &Value) -> std::result::Result<Value, RpcError> {
     match method {
-        "initialize" => Ok(json!({
-            "protocolVersion": params
-                .get("protocolVersion")
-                .and_then(Value::as_str)
-                .unwrap_or(PROTOCOL_VERSION),
-            "capabilities": { "tools": { "listChanged": false } },
-            "serverInfo": {
-                "name": "dbobcat",
-                "version": env!("CARGO_PKG_VERSION"),
-            },
-            "instructions": "Read-only database access via DBobcat connections. \
-                Only connections allowlisted in DBobcat Settings → Agent access are usable. \
-                Write statements are rejected by policy.",
-        })),
+        "initialize" => {
+            // Echo the client's version only when we actually support it;
+            // otherwise answer with ours (spec: server picks the version).
+            let requested = params.get("protocolVersion").and_then(Value::as_str);
+            let version = match requested {
+                Some(v) if v == PROTOCOL_VERSION => v,
+                _ => PROTOCOL_VERSION,
+            };
+            Ok(json!({
+                "protocolVersion": version,
+                "capabilities": { "tools": { "listChanged": false } },
+                "serverInfo": {
+                    "name": "dbobcat",
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
+                "instructions": "Read-only database access via DBobcat connections. \
+                    Only connections allowlisted in DBobcat Settings → Agent access are usable. \
+                    Write statements are rejected by policy.",
+            }))
+        }
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({
             "tools": tool_defs().iter().map(|t| json!({

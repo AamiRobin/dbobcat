@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { ipc } from "@/lib/ipc";
+import { t } from "@/lib/i18n";
+import { notify } from "@/lib/toast";
 import type { SavedSession } from "@/types/ipc";
 
 /**
@@ -34,7 +36,12 @@ export async function fetchMcpPolicy(): Promise<McpPolicy> {
 }
 
 export async function saveMcpPolicy(policy: McpPolicy): Promise<void> {
-  await ipc("app_settings_set", { key: MCP_KEY, value: policy as unknown as Record<string, unknown> });
+  try {
+    await ipc("app_settings_set", { key: MCP_KEY, value: policy as unknown as Record<string, unknown> });
+  } catch (err) {
+    console.warn("mcp policy save failed:", err);
+    notify.error(t("ai.mcp.saveError"));
+  }
 }
 
 /** Sessions available for the allowlist (metadata only). */

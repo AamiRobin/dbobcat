@@ -55,9 +55,14 @@ export function AiSettingsDialog() {
   const [testError, setTestError] = useState<string | null>(null);
 
   // Sync the masked hint with the encrypted store each time the dialog
-  // opens (the key may have been added/removed since).
+  // opens (the key may have been added/removed since), and never let a
+  // half-typed key linger in React state after the dialog closes.
   useEffect(() => {
-    if (open) void refreshKeyHint();
+    if (open) {
+      void refreshKeyHint();
+    } else {
+      setKeyDraft("");
+    }
   }, [open]);
 
   const handleSaveKey = async () => {

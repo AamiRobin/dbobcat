@@ -104,7 +104,9 @@ pub async fn ai_test(
     credentials: State<'_, CredentialStore>,
     config: AiProviderConfig,
 ) -> Result<String> {
-    let cancel = jobs.register(u64::MAX); // not cancellable (no id exposure)
+    // Backend-minted id: concurrent test clicks can never share a flag.
+    let job_id = jobs.mint();
+    let cancel = jobs.register(job_id);
     let key = credentials.get_password(ai::KEY_ENTRY_ID, None)?;
     let result = ai::run_job(
         &config,
@@ -122,7 +124,7 @@ pub async fn ai_test(
         |_| {},
     )
     .await;
-    jobs.finish(u64::MAX);
+    jobs.finish(job_id);
     result
 }
 

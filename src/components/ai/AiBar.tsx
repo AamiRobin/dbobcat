@@ -42,6 +42,8 @@ interface AiBarProps {
   replaceDoc: (text: string) => void;
   getSelection: () => string;
   getDoc: () => string;
+  /** Editor non-empty? (render-time, from doc length — no toString) */
+  hasEditorSql: boolean;
 }
 
 type Phase = "idle" | "streaming" | "done" | "error";
@@ -58,6 +60,7 @@ export function AiBar({
   replaceDoc,
   getSelection,
   getDoc,
+  hasEditorSql,
 }: AiBarProps) {
   const queryClient = useQueryClient();
 
@@ -75,7 +78,6 @@ export function AiBar({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const ready = aiReady({ enabled, baseUrl, model, keyHint });
-  const hasEditorSql = getDoc().trim().length > 0;
 
   // Abort an in-flight job when the tab (and this bar) goes away — no
   // silent token burn in the background.
@@ -242,7 +244,7 @@ export function AiBar({
               handleAsk();
             }
           }}
-          disabled={!enabled}
+          disabled={!enabled || connId === null}
           className="h-6 flex-1 border-none bg-transparent px-1 text-xs shadow-none focus-visible:ring-0"
           placeholder={
             !enabled
