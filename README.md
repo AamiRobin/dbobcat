@@ -13,6 +13,40 @@ DBobcat (**d**atabase + bobcat) is an open-source, cross-platform database GUI c
 
 Repository: <https://github.com/AamiRobin/dbobcat>
 
+## Install
+
+Download a build from [Releases](https://github.com/AamiRobin/dbobcat/releases/latest):
+
+- **macOS (Apple Silicon only)** — `.dmg` (or the `.app.tar.gz` if you'd rather extract by hand)
+- **Windows** — NSIS `-setup.exe`
+- **Linux** — `.AppImage` (may need `chmod +x`) or `.deb`
+
+### macOS first launch: "DBobcat is damaged and can't be opened"
+
+The app is **not** actually damaged. Builds are currently unsigned — there is no
+Apple Developer certificate behind them — and macOS Gatekeeper refuses *any*
+quarantined, unsigned download with that exact (misleading) message: browsers
+tag every downloaded file with a quarantine attribute, and Gatekeeper treats
+"unsigned + quarantined" as "damaged". The bits on disk are fine.
+
+Clear the quarantine flag once and the app opens normally from then on:
+
+```sh
+xattr -cr /Applications/DBobcat.app
+```
+
+Point the path at wherever the app lives — if you haven't moved it out of
+Downloads yet, use `~/Downloads/DBobcat.app`. If you'd rather not touch the
+Terminal: System Settings → Privacy & Security → scroll to the Security
+section → **Open Anyway**. (The older right-click → *Open* bypass no longer
+works on recent macOS.) Note that this only affects browser downloads —
+`curl`/`git`/Homebrew don't set the quarantine flag.
+
+### Windows first launch: SmartScreen warning
+
+Same story, Windows flavor: installers are unsigned, so SmartScreen shows
+"Windows protected your PC". Choose **More info → Run anyway**.
+
 ## Screenshots
 
 | | |
