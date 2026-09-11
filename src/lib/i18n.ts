@@ -481,6 +481,20 @@ export const en = {
   "ai.mcp.noSelection": "No connections selected — agents can see nothing.",
   "ai.mcp.cliHint": "Point your client at: dbobcat mcp",
   "ai.mcp.saveError": "Could not save agent-access policy",
+  // AI agent mode (Phase 13)
+  "ai.agent.toggle": "Agent mode",
+  "ai.agent.toggleHint": "Agent mode: the assistant can inspect the schema and run queries (writes need your confirmation)",
+  "ai.agent.wantsToRun": "Wants to run:",
+  "ai.agent.you": "You",
+  "ai.agent.assistant": "AI",
+  "ai.agent.tool": "Tool",
+  "ai.agent.notice": "Note",
+  "ai.agent.clear": "Clear",
+  "ai.agent.privacy": "Reads run automatically — writes need your confirmation.",
+  "ai.agent.confirmTitle": "Run this {risk}?",
+  "ai.agent.confirmBody": "The agent wants to execute a {risk} statement on",
+  "ai.agent.confirmRun": "Run it",
+  "ai.agent.decline": "Decline",
 } as const;
 
 export type TKey = keyof typeof en;

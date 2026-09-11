@@ -307,10 +307,14 @@ export function DiagramCanvas({
     dragRef.current = null;
   }
 
-  // Esc clears focus first, then the selection, while this canvas is mounted.
+  // Esc clears focus first, then the selection, while this canvas is
+  // mounted — unless a dialog (export confirm, command palette, …) is
+  // open: its Esc handling must not also wipe the diagram underneath.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('[role="dialog"], [role="alertdialog"]')) return;
       if (focusedId !== null) onFocusChange(null);
       else onSelect(null);
     };

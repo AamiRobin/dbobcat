@@ -909,7 +909,7 @@ pub fn make_formatter(
 ) -> Box<dyn RowFormatter> {
     match format {
         ExportFormat::Csv => Box::new(CsvFormatter::new(csv)),
-        ExportFormat::Tsv => Box::new(TsvFormatter::new(String::new())),
+        ExportFormat::Tsv => Box::new(TsvFormatter::new(csv.null_text.clone())),
         ExportFormat::Json => Box::new(JsonFormatter),
         ExportFormat::Xml => Box::new(XmlFormatter::new(statement)),
         ExportFormat::Html => Box::new(HtmlFormatter),

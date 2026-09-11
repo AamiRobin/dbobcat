@@ -16,7 +16,12 @@
 //! deltas are forwarded through a Tauri [`tauri::ipc::Channel`]. Jobs can be
 //! cancelled via [`AiJobs`] while in flight.
 
+pub mod agent;
+pub mod sql_risk;
+
 use std::collections::HashMap;
+
+use agent::WireMessage;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -110,9 +115,9 @@ fn require<'a>(field: Option<&'a String>, what: &str) -> Result<&'a str> {
 }
 
 /// Human name for a dialect id, used inside prompts.
-fn dialect_label(dialect: &str) -> &str {
+pub(crate) fn dialect_label(dialect: &str) -> &str {
     match dialect {
-        "postgresql" => "PostgreSQL",
+        "postgres" | "postgresql" => "PostgreSQL",
         "sqlite" => "SQLite",
         _ => "MySQL/MariaDB",
     }
@@ -257,18 +262,71 @@ pub async fn stream_chat(
     cancel: &AtomicBool,
     mut on_delta: impl FnMut(&str),
 ) -> Result<String> {
+    let wire: Vec<WireMessage> = messages
+        .iter()
+        .map(|m| WireMessage { role: m.role.to_string(), content: Some(m.content.clone()), tool_calls: None, tool_call_id: None })
+        .collect();
+    let outcome = stream_completion(
+        config, api_key, &wire, None, max_tokens, cancel, |delta| on_delta(delta),
+    )
+    .await?;
+    Ok(outcome.text)
+}
+
+/// One tool call assembled from streamed fragments.
+#[derive(Debug, Clone)]
+pub struct StreamedToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
+/// Aggregated result of one streamed completion turn.
+#[derive(Debug, Clone, Default)]
+pub struct StreamOutcome {
+    pub text: String,
+    pub tool_calls: Vec<StreamedToolCall>,
+    pub finish_reason: Option<String>,
+}
+
+/// Generalized streaming completion: optional tools, tool-call fragments
+/// accumulated per index, text deltas forwarded to `on_text`. The agent
+/// loop runs on this; the one-shot modes use the `stream_chat` wrapper.
+pub async fn stream_completion(
+    config: &AiProviderConfig,
+    api_key: Option<&str>,
+    messages: &[WireMessage],
+    tools: Option<&serde_json::Value>,
+    max_tokens: u32,
+    cancel: &AtomicBool,
+    mut on_text: impl FnMut(&str),
+) -> Result<StreamOutcome> {
     let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
-    // `max_tokens` is the OpenAI-compatible staple; newer OpenAI models
-    // (o-series, gpt-5-class) reject it in favor of `max_completion_tokens`,
-    // so send both — OpenAI-compatible servers ignore unknown fields.
-    let body = serde_json::json!({
+    // Token ceilings: `max_tokens` is the OpenAI-compatible staple, but
+    // OpenAI's reasoning families (o-series, gpt-5-class) REJECT it in
+    // favor of `max_completion_tokens` — send exactly one based on the
+    // model id. Everything else keeps the classic spelling.
+    let model = config.model.to_ascii_lowercase();
+    let wants_completion_tokens = model.starts_with("o1")
+        || model.starts_with("o3")
+        || model.starts_with("o4")
+        || model.contains("gpt-5");
+    let mut body = serde_json::json!({
         "model": config.model,
         "messages": messages,
         "stream": true,
-        "temperature": TEMPERATURE,
-        "max_tokens": max_tokens,
-        "max_completion_tokens": max_tokens,
     });
+    if wants_completion_tokens {
+        // Reasoning models reject `temperature != 1` outright.
+        body["max_completion_tokens"] = serde_json::json!(max_tokens);
+    } else {
+        body["temperature"] = serde_json::json!(TEMPERATURE);
+        body["max_tokens"] = serde_json::json!(max_tokens);
+    }
+    if let Some(tools) = tools {
+        body["tools"] = tools.clone();
+        body["tool_choice"] = serde_json::Value::String("auto".into());
+    }
 
     let client = reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
@@ -299,7 +357,9 @@ pub async fn stream_chat(
 
     let mut response = response;
     let mut buffer: Vec<u8> = Vec::new();
-    let mut full = String::new();
+    let mut outcome = StreamOutcome::default();
+    // Streaming tool calls arrive as fragments keyed by `index`.
+    let mut tool_frags: Vec<(u64, Option<String>, Option<String>, String)> = Vec::new();
 
     loop {
         if cancel.load(Ordering::Relaxed) {
@@ -324,59 +384,172 @@ pub async fn stream_chat(
             };
             let payload = payload.trim();
             if payload == "[DONE]" {
-                return Ok(full);
-            }
-            match extract_delta(payload) {
-                Ok(Some(delta)) if !delta.is_empty() => {
-                    full.push_str(&delta);
-                    on_delta(&delta);
+                finish_tool_calls(&mut outcome, &mut tool_frags);
+                if outcome.text.is_empty() && outcome.tool_calls.is_empty() {
+                    return Err(AppError::Config(
+                        "AI provider returned an empty response".into(),
+                    ));
                 }
+                return Ok(outcome);
+            }
+            match extract_frame(payload, &mut on_text, &mut outcome, &mut tool_frags) {
+                Ok(()) => {}
                 // Null-content frames (role-only) and non-JSON keep-alives.
-                Ok(_) => continue,
-                Err(message) => return Err(AppError::Config(message)),
+                Err(FrameError::Ignore) => continue,
+                Err(FrameError::Fatal(message)) => return Err(AppError::Config(message)),
             }
         }
     }
 
-    if full.is_empty() {
-        return Err(AppError::Config(
-            "AI provider returned an empty response".into(),
-        ));
+    // A final frame without its trailing newline still carries data —
+    // process the buffer remainder before giving up on the body.
+    if !buffer.is_empty() {
+        let line = String::from_utf8_lossy(&buffer);
+        let line = line.trim_end_matches('\r');
+        if let Some(payload) = line.strip_prefix("data:") {
+            let payload = payload.trim();
+            if payload != "[DONE]" {
+                let _ = extract_frame(payload, &mut on_text, &mut outcome, &mut tool_frags);
+            }
+        }
     }
-    Ok(full)
+    finish_tool_calls(&mut outcome, &mut tool_frags);
+    if outcome.text.is_empty() && outcome.tool_calls.is_empty() {
+        return Err(AppError::Config("AI provider returned an empty response".into()));
+    }
+    Ok(outcome)
 }
 
-/// Pull the text delta out of one SSE `data:` payload. Handles the
-/// `chat.completion.chunk` shape (`choices[0].delta.content`), tolerates
-/// null content (role-only frames), and reports mid-stream error frames as
-/// `Err` with a readable message.
-fn extract_delta(payload: &str) -> std::result::Result<Option<String>, String> {
+fn finish_tool_calls(
+    outcome: &mut StreamOutcome,
+    frags: &mut Vec<(u64, Option<String>, Option<String>, String)>,
+) {
+    frags.sort_by_key(|(index, _, _, _)| *index);
+    for (position, (_, id, name, arguments)) in frags.drain(..).enumerate() {
+        if let Some(name) = name.filter(|n| !n.is_empty()) {
+            // Id-less providers (some local servers) still get a call — the
+            // loop synthesizes matching ids for the tool results anyway.
+            outcome.tool_calls.push(StreamedToolCall {
+                id: id.unwrap_or_else(|| format!("call_{position}")),
+                name,
+                arguments,
+            });
+        }
+    }
+}
+
+enum FrameError {
+    /// Non-JSON keep-alives / role-only frames: skip silently.
+    Ignore,
+    /// Mid-stream provider error frames: fail the request.
+    Fatal(String),
+}
+
+/// Parse one SSE `data:` frame, forwarding text deltas and accumulating
+/// tool-call fragments into the outcome.
+fn extract_frame(
+    payload: &str,
+    on_text: &mut impl FnMut(&str),
+    outcome: &mut StreamOutcome,
+    tool_frags: &mut Vec<(u64, Option<String>, Option<String>, String)>,
+) -> std::result::Result<(), FrameError> {
     let value: serde_json::Value = match serde_json::from_str(payload) {
         Ok(v) => v,
-        Err(_) => return Ok(None), // non-JSON keep-alive / partial frame
+        Err(_) => return Err(FrameError::Ignore),
     };
     if let Some(err) = value.get("error") {
         let message = err
             .get("message")
             .and_then(|m| m.as_str())
             .unwrap_or("unknown provider error");
-        return Err(format!("AI provider error: {message}"));
+        return Err(FrameError::Fatal(format!("AI provider error: {message}")));
     }
     let Some(choice) = value.get("choices").and_then(|c| c.get(0)) else {
-        return Ok(None);
+        return Err(FrameError::Ignore);
     };
-    if let Some(content) = choice
-        .get("delta")
-        .and_then(|d| d.get("content"))
-        .and_then(|c| c.as_str())
-    {
-        return Ok(Some(content.to_string()));
+    if let Some(reason) = choice.get("finish_reason").and_then(|r| r.as_str()) {
+        outcome.finish_reason = Some(reason.to_string());
     }
-    // Legacy/plain completion frames (`choices[0].text`) — some proxies.
-    Ok(choice
-        .get("text")
-        .and_then(|t| t.as_str())
-        .map(str::to_string))
+    if let Some(delta) = choice.get("delta") {
+        if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+            if !content.is_empty() {
+                outcome.text.push_str(content);
+                on_text(content);
+            }
+        }
+        if let Some(fragments) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+            for (position, fragment) in fragments.iter().enumerate() {
+                let explicit_index = fragment.get("index").and_then(|i| i.as_u64());
+                let fragment_id = fragment
+                    .get("id")
+                    .and_then(|i| i.as_str())
+                    .map(str::to_string);
+                // Index-less providers: match by id, else treat each frame
+                // as a continuation of the newest entry.
+                let entry_index = match explicit_index {
+                    Some(index) => {
+                        match tool_frags.iter().position(|(i, ..)| *i == index) {
+                            Some(entry_index) => entry_index,
+                            None => {
+                                tool_frags.push((index, fragment_id, None, String::new()));
+                                tool_frags.len() - 1
+                            }
+                        }
+                    }
+                    None => {
+                        if let Some(id) = fragment_id.as_ref() {
+                            match tool_frags
+                                .iter()
+                                .position(|(_, existing, _, _)| existing.as_deref() == Some(id.as_str()))
+                            {
+                                Some(entry_index) => entry_index,
+                                None => {
+                                    let next = tool_frags
+                                        .iter()
+                                        .map(|(i, _, _, _)| *i)
+                                        .max()
+                                        .unwrap_or(0)
+                                        + 1;
+                                    tool_frags.push((next, fragment_id, None, String::new()));
+                                    tool_frags.len() - 1
+                                }
+                            }
+                        } else if tool_frags.is_empty() {
+                            tool_frags.push((position as u64, None, None, String::new()));
+                            tool_frags.len() - 1
+                        } else {
+                            tool_frags.len() - 1
+                        }
+                    }
+                };
+                let entry = &mut tool_frags[entry_index];
+                if let Some(id) = fragment.get("id").and_then(|i| i.as_str()) {
+                    entry.1 = Some(id.to_string());
+                }
+                if let Some(name) = fragment
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                {
+                    entry.2 = Some(name.to_string());
+                }
+                if let Some(args) = fragment
+                    .get("function")
+                    .and_then(|f| f.get("arguments"))
+                    .and_then(|a| a.as_str())
+                {
+                    entry.3.push_str(args);
+                }
+            }
+        }
+    } else if let Some(text) = choice.get("text").and_then(|t| t.as_str()) {
+        // Legacy/plain completion frames (`choices[0].text`) — some proxies.
+        if !text.is_empty() {
+            outcome.text.push_str(text);
+            on_text(text);
+        }
+    }
+    Ok(())
 }
 
 fn reqwest_error(e: reqwest::Error) -> AppError {
@@ -518,18 +691,46 @@ mod tests {
     }
 
     #[test]
-    fn delta_extraction_chunk_shape() {
+    fn frame_extraction_chunk_shape() {
+        let mut sink = |_: &str| {};
+        let mut outcome = StreamOutcome::default();
+        let mut frags = Vec::new();
+
         let payload = r#"{"choices":[{"delta":{"role":"assistant"}}]}"#;
-        assert_eq!(extract_delta(payload).unwrap(), None);
+        assert!(extract_frame(payload, &mut sink, &mut outcome, &mut frags).is_ok());
         let payload = r#"{"choices":[{"delta":{"content":"SELECT "}}]}"#;
-        assert_eq!(extract_delta(payload).unwrap(), Some("SELECT ".into()));
+        assert!(extract_frame(payload, &mut sink, &mut outcome, &mut frags).is_ok());
         let payload = r#"{"choices":[{"delta":{"content":null}}]}"#;
-        assert_eq!(extract_delta(payload).unwrap(), None);
+        assert!(extract_frame(payload, &mut sink, &mut outcome, &mut frags).is_ok());
         let payload = r#"{"choices":[{"text":"legacy"}]}"#;
-        assert_eq!(extract_delta(payload).unwrap(), Some("legacy".into()));
-        assert_eq!(extract_delta("not json").unwrap(), None);
+        assert!(extract_frame(payload, &mut sink, &mut outcome, &mut frags).is_ok());
+        assert!(extract_frame("not json", &mut sink, &mut outcome, &mut frags).is_err());
         let payload = r#"{"error":{"message":"bad key"}}"#;
-        assert_eq!(extract_delta(payload).unwrap_err(), "AI provider error: bad key");
+        assert!(matches!(
+            extract_frame(payload, &mut sink, &mut outcome, &mut frags),
+            Err(FrameError::Fatal(_))
+        ));
+        assert_eq!(outcome.text, "SELECT legacy");
+    }
+
+    #[test]
+    fn frame_extracts_tool_call_fragments() {
+        let mut sink = |_: &str| {};
+        let mut outcome = StreamOutcome::default();
+        let mut frags = Vec::new();
+
+        let first = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"execute_query","arguments":"{\"sql\":"}}]}}]}"#;
+        let second = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"SELECT 1\"}"}}]}}],"finish_reason":null}"#;
+        assert!(extract_frame(first, &mut sink, &mut outcome, &mut frags).is_ok());
+        assert!(extract_frame(second, &mut sink, &mut outcome, &mut frags).is_ok());
+        finish_tool_calls(&mut outcome, &mut frags);
+
+        assert!(outcome.text.is_empty());
+        assert_eq!(outcome.tool_calls.len(), 1);
+        let call = &outcome.tool_calls[0];
+        assert_eq!(call.id, "call_1");
+        assert_eq!(call.name, "execute_query");
+        assert_eq!(call.arguments, r#"{"sql":"SELECT 1"}"#);
     }
 
     #[test]
@@ -542,6 +743,9 @@ mod tests {
             "data: [DONE]",
         ];
         let mut out = String::new();
+        let mut outcome = StreamOutcome::default();
+        let mut frags = Vec::new();
+        let mut sink = |delta: &str| out.push_str(delta);
         for line in lines {
             let Some(payload) = line.strip_prefix("data:") else {
                 continue;
@@ -550,9 +754,7 @@ mod tests {
             if payload == "[DONE]" {
                 break;
             }
-            if let Ok(Some(delta)) = extract_delta(payload) {
-                out.push_str(&delta);
-            }
+            let _ = extract_frame(payload, &mut sink, &mut outcome, &mut frags);
         }
         assert_eq!(out, "a");
     }

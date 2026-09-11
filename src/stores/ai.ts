@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { fetchAiKeyStatus } from "@/lib/ai-queries";
+import { useTabsStore } from "@/stores/tabs";
 
 /**
  * AI assistant settings (Phase 12) — persisted app preference, same
@@ -98,3 +99,98 @@ export function aiReady(s: Pick<AiSettingsState, "enabled" | "baseUrl" | "model"
 export function openAiSettings(): void {
   useAiStore.getState().setDialogOpen(true);
 }
+
+// ---------------------------------------------------------------------------
+// Agent session (Phase 13) — per-tab conversation state
+// ---------------------------------------------------------------------------
+
+import type {
+  AgentPendingWrite,
+  AgentRunResult,
+  AgentWireMessage,
+} from "@/types/ipc";
+
+/** One visible line of the agent conversation log. */
+export interface AgentChatEntry {
+  kind: "user" | "assistant" | "tool" | "notice";
+  text: string;
+  ok?: boolean;
+}
+
+export interface AgentSession {
+  /** Agent mode toggle for this tab. */
+  agentMode: boolean;
+  /** In-flight agent job id (survives hasResults remounts → Stop works). */
+  jobId: number | null;
+  /** Wire conversation, echoed back to the backend on every run. */
+  messages: AgentWireMessage[];
+  /** Display log (what the user sees). */
+  entries: AgentChatEntry[];
+  running: boolean;
+  pending: AgentPendingWrite | null;
+  lastResult: AgentRunResult | null;
+  error: string | null;
+}
+
+const EMPTY_SESSION: AgentSession = {
+  agentMode: false,
+  jobId: null,
+  messages: [],
+  entries: [],
+  running: false,
+  pending: null,
+  lastResult: null,
+  error: null,
+};
+
+interface AiAgentState {
+  byTab: Record<string, AgentSession>;
+  patch: (tabId: string, partial: Partial<AgentSession>) => void;
+  clear: (tabId: string) => void;
+}
+
+export const useAiAgentStore = create<AiAgentState>((set) => ({
+  byTab: {},
+
+  patch: (tabId, partial) =>
+    set((state) => ({
+      byTab: {
+        ...state.byTab,
+        [tabId]: { ...(state.byTab[tabId] ?? EMPTY_SESSION), ...partial },
+      },
+    })),
+
+  clear: (tabId) =>
+    set((state) => {
+      if (!(tabId in state.byTab)) return state;
+      const next = { ...state.byTab };
+      // Clearing the conversation must not exit agent mode.
+      next[tabId] = { ...EMPTY_SESSION, agentMode: state.byTab[tabId].agentMode };
+      return { byTab: next };
+    }),
+}));
+
+/** Session for a tab (never null — callers read from the fallback). */
+export function agentSession(
+  byTab: Record<string, AgentSession>,
+  tabId: string,
+): AgentSession {
+  return byTab[tabId] ?? EMPTY_SESSION;
+}
+
+// Tab close drops the session entirely (the UI's Clear button keeps the
+// agentMode toggle; this must not).
+useTabsStore.subscribe((next, prev) => {
+  if (next.tabs.length >= prev.tabs.length) return;
+  const ids = new Set(next.tabs.map((t) => t.id));
+  const state = useAiAgentStore.getState();
+  const nextByTab = { ...state.byTab };
+  let dropped = false;
+  for (const id of Object.keys(nextByTab)) {
+    if (!ids.has(id)) {
+      delete nextByTab[id];
+      dropped = true;
+    }
+  }
+  if (dropped) useAiAgentStore.setState({ byTab: nextByTab });
+});

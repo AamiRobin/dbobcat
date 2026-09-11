@@ -145,7 +145,7 @@ describe("oneTickPath / parent cardinality", () => {
     expect(path).toBe("M 95.00 107.00 L 105.00 107.00");
   });
 
-  test("every non-composite edge carries a tick; composite does not", () => {
+  test("long-enough non-composite edges carry a tick; composite does not", () => {
     const boxes = { customers: box(0, 0), orders: box(400, 0) };
     const plain = computeEdgeGeometry(baseEdge, boxes)!;
     const composite = computeEdgeGeometry({ ...baseEdge, composite: true }, boxes)!;

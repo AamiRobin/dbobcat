@@ -1006,3 +1006,74 @@ export interface AiKeyStatus {
   hasKey: boolean;
   hint?: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// AI agent mode (Phase 13)
+// ---------------------------------------------------------------------------
+
+/**
+ * One tool call on the OpenAI wire format. Field names mirror the Rust
+ * serde output exactly (snake_case) because the frontend echoes these
+ * payloads back verbatim.
+ */
+export interface AgentWireToolCall {
+  /** "function" when produced by the backend. */
+  type?: "function" | string;
+  id: string;
+  function: { name: string; arguments: string };
+}
+
+/**
+ * One chat message: roles carry `content`, assistant tool-use turns carry
+ * `tool_calls`, tool results carry `tool_call_id`.
+ */
+export interface AgentWireMessage {
+  role: "system" | "user" | "assistant" | "tool" | string;
+  content?: string | null;
+  tool_calls?: AgentWireToolCall[];
+  tool_call_id?: string;
+}
+
+/** Streaming events while an agent run executes. */
+export type AgentEvent =
+  | { kind: "text_delta"; delta: string }
+  | { kind: "tool_start"; name: string }
+  | { kind: "tool_end"; name: string; ok: boolean; summary: string }
+  | { kind: "notice"; message: string };
+
+/** A write paused for the user's decision. */
+export interface AgentPendingWrite {
+  call: AgentWireToolCall;
+  sql: string;
+  /** "write" | "ddl" | "unknown". */
+  risk: string;
+  /** Target snapshot from pause time — build grants from these. */
+  connId: number;
+  db: string;
+}
+
+/** A user-approved write, bound to connection + database + exact SQL. */
+export interface AgentWriteGrant {
+  sql: string;
+  connId: number;
+  db: string;
+}
+
+export interface AgentResume {
+  approved: boolean;
+  call: AgentWireToolCall;
+  grant?: AgentWriteGrant | null;
+}
+
+export interface AgentRunRequest {
+  messages: AgentWireMessage[];
+  resume?: AgentResume | null;
+}
+
+export interface AgentRunResult {
+  status: "done" | "awaiting_confirmation" | "cancelled";
+  text: string;
+  messages: AgentWireMessage[];
+  pending?: AgentPendingWrite | null;
+  turnsUsed: number;
+}

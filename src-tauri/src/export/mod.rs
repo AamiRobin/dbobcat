@@ -1160,7 +1160,7 @@ async fn run_dump_inner(
                             if mode == DataStatement::DeleteInsert {
                                 if let Some(ready) = batcher.take_ready() {
                                     output.write_str(&ready)?;
-                                    if options.delay_ms > 0 {
+                                    if options.delay_ms > 0 && !cancel.is_cancelled() {
                                         std::thread::sleep(Duration::from_millis(
                                             options.delay_ms as u64,
                                         ));
@@ -1171,7 +1171,7 @@ async fn run_dump_inner(
                         if mode != DataStatement::DeleteInsert {
                             if let Some(ready) = batcher.take_ready() {
                                 output.write_str(&ready)?;
-                                if options.delay_ms > 0 {
+                                if options.delay_ms > 0 && !cancel.is_cancelled() {
                                     std::thread::sleep(Duration::from_millis(
                                         options.delay_ms as u64,
                                     ));

@@ -91,3 +91,39 @@ export function fetchDiagramForeignKeysForAi(
     staleTime: TREE_STALE_TIME,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Agent mode (Phase 13)
+// ---------------------------------------------------------------------------
+
+/**
+ * Run one agent invocation. Events stream through `onEvent` (text deltas,
+ * tool activity); the result carries the updated conversation and either a
+ * final answer or a pending write awaiting the user's decision. Stateless:
+ * the caller echoes `result.messages` back on the next run.
+ */
+export async function runAgent(
+  jobId: number,
+  config: AiProviderConfig,
+  args: {
+    connId: number;
+    db: string;
+    dialect: string;
+    schema?: string | null;
+    request: import("@/types/ipc").AgentRunRequest;
+  },
+  onEvent: (event: import("@/types/ipc").AgentEvent) => void,
+): Promise<import("@/types/ipc").AgentRunResult> {
+  const onEventChannel = new Channel<import("@/types/ipc").AgentEvent>();
+  onEventChannel.onmessage = onEvent;
+  return ipc("ai_agent_run", {
+    jobId,
+    config,
+    connId: args.connId,
+    db: args.db,
+    dialect: args.dialect,
+    schema: args.schema ?? null,
+    request: args.request,
+    onEvent: onEventChannel,
+  });
+}

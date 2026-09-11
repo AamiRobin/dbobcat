@@ -10,7 +10,11 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::State;
 
-use crate::ai::{self, AiJob, AiJobs, AiProviderConfig};
+use crate::ai::agent::{
+    self, AgentEvent, AgentRunRequest, AgentRunResult,
+};
+use crate::ai::{self, AiJob, AiJobs, AiProviderConfig, StreamOutcome};
+use crate::connections::manager::ConnectionManager;
 use crate::credentials::CredentialStore;
 use crate::error::{AppError, Result};
 
@@ -132,4 +136,88 @@ pub async fn ai_test(
 #[tauri::command]
 pub fn ai_cancel(jobs: State<'_, AiJobs>, job_id: u64) -> bool {
     jobs.cancel(job_id)
+}
+
+// ---------------------------------------------------------------------------
+// Agent mode (Phase 13)
+// ---------------------------------------------------------------------------
+
+/// Chat-completions provider backed by the shared SSE client.
+struct SseProvider<'a> {
+    config: &'a AiProviderConfig,
+    key: Option<&'a str>,
+}
+
+impl agent::ChatProvider for SseProvider<'_> {
+    fn chat<'a>(
+        &'a mut self,
+        messages: &'a [agent::WireMessage],
+        tools: &'a serde_json::Value,
+        max_tokens: u32,
+        cancel: &'a std::sync::atomic::AtomicBool,
+        on_text: &'a mut (dyn FnMut(&str) + Send),
+    ) -> agent::BoxFuture<'a, Result<StreamOutcome>> {
+        Box::pin(async move {
+            ai::stream_completion(self.config, self.key, messages, Some(tools), max_tokens, cancel, on_text)
+                .await
+        })
+    }
+}
+
+/// One agent run: streams events onto `on_event`, executes read-only tools
+/// against the live connection, and pauses (with the exact SQL) on any
+/// write/DDL pending the user's confirmation. The conversation is echoed
+/// back and forth statelessly.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn ai_agent_run(
+    jobs: State<'_, AiJobs>,
+    credentials: State<'_, CredentialStore>,
+    connections: State<'_, ConnectionManager>,
+    job_id: u64,
+    config: AiProviderConfig,
+    conn_id: u32,
+    db: String,
+    dialect: String,
+    schema: Option<String>,
+    request: AgentRunRequest,
+    on_event: Channel<AgentEvent>,
+) -> Result<AgentRunResult> {
+    let cancel = jobs.register(job_id);
+    let key = credentials.get_password(ai::KEY_ENTRY_ID, None)?;
+    let mut provider = SseProvider { config: &config, key: key.as_deref() };
+    let mut backend = agent::ManagerBackend {
+        manager: &connections,
+        conn_id,
+        db: db.clone(),
+        dialect: agent_parse_dialect(&dialect),
+    };
+    let mut forward = |event: AgentEvent| {
+        let _ = on_event.send(event);
+    };
+    let result = agent::run_agent(
+        agent::AgentContext {
+            provider: &mut provider,
+            backend: &mut backend,
+            cancel: &cancel,
+            conn_id,
+            dialect: &dialect,
+            db: &db,
+            schema: schema.as_deref(),
+            on_event: &mut forward,
+        },
+        request,
+    )
+    .await;
+    jobs.finish(job_id);
+    result
+}
+
+/// Map the wire dialect id onto the classifier/backend dialect.
+fn agent_parse_dialect(dialect: &str) -> crate::connections::dialect::SqlDialect {
+    match dialect {
+        "postgres" | "postgresql" => crate::connections::dialect::SqlDialect::Postgres,
+        "sqlite" => crate::connections::dialect::SqlDialect::Sqlite,
+        _ => crate::connections::dialect::SqlDialect::Mysql,
+    }
 }

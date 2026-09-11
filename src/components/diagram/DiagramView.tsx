@@ -535,12 +535,15 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
             else next[id] = true;
             patch(tabId, { collapsed: next });
           }}
-          onHide={(id) =>
+          onHide={(id) => {
+            // A hidden focused card would leave focus pointing at nothing:
+            // every remaining node dims with no anchor. Exit focus instead.
+            if (focusId === id) setFocusId(null);
             patch(tabId, {
               hidden: [...dia.hidden, id],
               selection: dia.selection === id ? null : dia.selection,
-            })
-          }
+            });
+          }}
           onOpenDesigner={(id) => openDesignerTab(connId, db, id)}
           registerFit={(fn) => {
             fitRef.current = fn;

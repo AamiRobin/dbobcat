@@ -610,6 +610,7 @@ export function QueryView({ tab }: { tab: Tab }) {
                 <ResizablePanel defaultSize={hasResults ? "55" : "100"} minSize="15" className="min-h-0">
                   <div className="flex h-full min-h-0 flex-col overflow-hidden">
                     <AiBar
+                      tabId={tab.id}
                       connId={connId}
                       db={db}
                       dialect={dialect}

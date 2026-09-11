@@ -43,6 +43,10 @@ flate2 = "1"
 regex = "1"
 # Streaming XLSX export: xlsx is a ZIP of XML parts written incrementally.
 zip = { version = "4.6", default-features = false, features = ["deflate"] }
+# AST-based SQL risk classification for the AI agent (read/write/DDL gates).
+# `visitor` powers the recursive write scanner (subqueries, CTEs, derived
+# tables, expression subqueries).
+sqlparser = { version = "0.62", features = ["visitor"] }
 # AI assistant (Phase 12): OpenAI-compatible chat-completions client.
 # rustls to match the DB drivers' TLS stack; no default features to keep
 # native-tls and its platform stacks out of the build. Chunks are consumed

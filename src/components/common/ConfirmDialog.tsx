@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +18,8 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  secondaryLabel,
+  onSecondary,
   destructive = false,
   children,
   busy = false,
@@ -31,6 +34,9 @@ export function ConfirmDialog({
   children?: React.ReactNode;
   busy?: boolean;
   onConfirm: () => void;
+  /** Optional secondary action (e.g. agent "Decline") next to Cancel. */
+  secondaryLabel?: string;
+  onSecondary?: () => void;
 }) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -46,6 +52,11 @@ export function ConfirmDialog({
         {children}
         <AlertDialogFooter>
           <AlertDialogCancel>{t("dialog.cancel")}</AlertDialogCancel>
+          {secondaryLabel && onSecondary && (
+            <Button variant="outline" onClick={onSecondary}>
+              {secondaryLabel}
+            </Button>
+          )}
           <AlertDialogAction
             variant={destructive ? "destructive" : "default"}
             disabled={busy}

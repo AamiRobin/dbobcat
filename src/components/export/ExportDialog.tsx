@@ -221,7 +221,8 @@ function ExportDialogInner({
     };
     if (destKind === "file") {
       if (!path) return null;
-      destination = fileDestination(path, gzip);
+      // XLSX is already a ZIP: never send a stale gzip flag.
+      destination = fileDestination(path, gzip && !xlsxFileOnly);
     } else if (destKind === "clipboard") {
       destination = { kind: "clipboard" };
     } else {
@@ -448,6 +449,8 @@ function ExportDialogInner({
           <section className="flex flex-col gap-2 rounded-md border p-2.5">
             <p className="text-xs font-medium text-muted-foreground">CSV options</p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+              {format === "csv" && (
+              <>
               <label className="flex items-center gap-1.5 text-muted-foreground">
                 Delimiter
                 <Select
@@ -478,6 +481,8 @@ function ExportDialogInner({
                   </SelectContent>
                 </Select>
               </label>
+              </>
+              )}
               <label className="flex items-center gap-1.5 text-muted-foreground">
                 NULL as
                 <Input
@@ -656,7 +661,7 @@ function ExportDialogInner({
                           onChange={(e) =>
                             setDump({
                               ...dump,
-                              maxInsertSizeKb: Number(e.target.value) || 0,
+                              maxInsertSizeKb: Math.max(0, Math.floor(Number(e.target.value) || 0)),
                             })
                           }
                           className="h-6 w-20 px-1.5 font-mono text-xs"
@@ -670,7 +675,10 @@ function ExportDialogInner({
                           min={1}
                           value={dump.batchRows}
                           onChange={(e) =>
-                            setDump({ ...dump, batchRows: Number(e.target.value) || 0 })
+                            setDump({
+                              ...dump,
+                              batchRows: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                            })
                           }
                           className="h-6 w-20 px-1.5 font-mono text-xs"
                         />
@@ -682,7 +690,10 @@ function ExportDialogInner({
                           min={0}
                           value={dump.delayMs}
                           onChange={(e) =>
-                            setDump({ ...dump, delayMs: Number(e.target.value) || 0 })
+                            setDump({
+                              ...dump,
+                              delayMs: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                            })
                           }
                           className="h-6 w-20 px-1.5 font-mono text-xs"
                         />

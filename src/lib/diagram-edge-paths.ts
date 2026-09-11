@@ -142,6 +142,11 @@ export function computeEdgeGeometry(
     if (to.y === from.y) return null;
   }
 
+  // Manual drags can leave a 2-3px gap between cards; a 7px-deep tick
+  // would land inside the child card, so skip it when the run is short.
+  const edgeLength = Math.hypot(to.x - from.x, to.y - from.y);
+  const showTick = !edge.composite && edgeLength >= 2 * TICK_DEPTH;
+
   // Smoothed bezier: control points biased along the dominant axis so the
   // curve leaves/enters borders perpendicular-ish.
   const cx1 = from.x + (to.x - from.x) * 0.45;
@@ -166,7 +171,7 @@ export function computeEdgeGeometry(
       edge.composite || !edge.targetColumn
         ? null
         : crowFootPath(to, angle),
-    oneTick: edge.composite ? null : oneTickPath(from, parentAngle),
+    oneTick: showTick ? oneTickPath(from, parentAngle) : null,
     filled: !edge.nullableChild && !edge.composite,
     labelPoint: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 },
   };

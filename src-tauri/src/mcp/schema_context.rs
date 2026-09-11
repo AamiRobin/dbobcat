@@ -14,7 +14,7 @@ const MAX_COLUMNS_PER_TABLE: usize = 120;
 
 pub fn dialect_label(dialect: &str) -> &str {
     match dialect {
-        "postgresql" => "PostgreSQL",
+        "postgres" | "postgresql" => "PostgreSQL",
         "sqlite" => "SQLite",
         _ => "MySQL/MariaDB",
     }

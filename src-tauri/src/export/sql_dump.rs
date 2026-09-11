@@ -173,11 +173,18 @@ pub fn drop_database_sql(db: &str, dialect: SqlDialect) -> Option<String> {
 /// Empty one table before its rows are re-inserted ("Delete data before
 /// insert"). SQLite has no TRUNCATE, so it gets a plain DELETE.
 pub fn truncate_table_sql(db: &str, table: &str, dialect: SqlDialect) -> String {
+    // The dialect METHOD (not the MySQL-hardcoded free function) quotes
+    // with each engine's identifier style and escapes embedded quotes.
     match dialect {
-        // quote_qualified is MySQL-flavoured; PG identifiers need double
-        // quotes (same as the DROP VIEW branches in the orchestrator).
-        SqlDialect::Mysql => format!("TRUNCATE TABLE {};\n", quote_qualified(&[db, table])),
-        SqlDialect::Postgres => format!("TRUNCATE TABLE \"{db}\".\"{table}\";\n"),
+        SqlDialect::Mysql => {
+            format!("TRUNCATE TABLE {};\n", SqlDialect::Mysql.quote_qualified(&[db, table]))
+        }
+        SqlDialect::Postgres => {
+            format!(
+                "TRUNCATE TABLE {};\n",
+                SqlDialect::Postgres.quote_qualified(&[db, table])
+            )
+        }
         SqlDialect::Sqlite => format!("DELETE FROM {};\n", quote_ident(table)),
     }
 }

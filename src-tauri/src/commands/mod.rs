@@ -134,6 +134,7 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         ai::ai_key_status,
         ai::ai_delete_key,
         ai::ai_run,
+        ai::ai_agent_run,
         ai::ai_test,
         ai::ai_cancel,
     ])

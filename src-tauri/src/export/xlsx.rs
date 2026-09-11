@@ -69,12 +69,17 @@ pub fn sanitize_sheet_name(base: &str, taken: &[String]) -> String {
     } else {
         trimmed.chars().take(31).collect()
     };
-    if taken.iter().any(|t| t == &name) {
+    // Excel compares sheet names case-insensitively — `Users` vs `users`
+    // would flag the workbook as damaged.
+    let taken_lower: Vec<String> = taken.iter().map(|t| t.to_lowercase()).collect();
+    let mut name_lower = name.to_lowercase();
+    if taken_lower.contains(&name_lower) {
         let stem: String = name.chars().take(26).collect();
         let mut n = 2;
         loop {
             name = format!("{stem} ({n})");
-            if !taken.iter().any(|t| t == &name) {
+            name_lower = name.to_lowercase();
+            if !taken_lower.contains(&name_lower) {
                 break;
             }
             n += 1;
