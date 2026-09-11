@@ -28,6 +28,23 @@ pub enum DumpWhat {
     Data,
 }
 
+/// How data rows are written on import (mirrors HeidiSQL's "Data" pulldown).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DataStatement {
+    #[default]
+    Insert,
+    /// Duplicate rows are skipped (MySQL `INSERT IGNORE`).
+    InsertIgnore,
+    /// Duplicate rows are overwritten (MySQL/SQLite `REPLACE INTO`;
+    /// PostgreSQL gets `ON CONFLICT (pk) DO UPDATE`).
+    Replace,
+    /// One `DELETE FROM t WHERE pk = …` before each row's INSERT, so
+    /// importing really overwrites — unlike REPLACE it also removes target
+    /// rows that no longer exist in the source's key space.
+    DeleteInsert,
+}
+
 /// Full option set of the "Export database as SQL" dialog (mirrors
 /// `SqlDumpOptions` in `src/types/ipc.ts`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -39,25 +56,37 @@ pub struct SqlDumpOptions {
     pub what: DumpWhat,
     /// Emit `DROP TABLE IF EXISTS` before each CREATE.
     pub drop_add: bool,
+    /// Emit `DROP DATABASE IF EXISTS` before the CREATE DATABASE header.
+    pub drop_database: bool,
     /// Wrap each table's data in `LOCK TABLES ... WRITE; / UNLOCK TABLES;`.
     pub add_locks: bool,
     /// Include explicit column lists in INSERTs.
     pub complete_inserts: bool,
-    /// Multi-row VALUES batches (~1000 rows or ~1 MB) instead of one
-    /// INSERT per row.
+    /// Multi-row VALUES batches instead of one INSERT per row.
     pub extended_inserts: bool,
+    /// Rows per extended INSERT statement (extended mode only).
+    pub batch_rows: u32,
+    /// Soft byte cap per extended INSERT statement, in KB — keep it below
+    /// the target server's `max_allowed_packet`.
+    pub max_insert_size_kb: u32,
+    /// Milliseconds to sleep between emitted INSERT statements.
+    pub delay_ms: u32,
     /// Wrap data inserts in START TRANSACTION / COMMIT.
     pub use_transactions: bool,
     /// Emit CREATE DATABASE IF NOT EXISTS + USE per database.
     pub create_db_header: bool,
     /// Strip `DEFINER=user@host` from routines/triggers/views/events.
     pub definer_strip: bool,
+    /// Strip `AUTO_INCREMENT=N` from CREATE TABLE.
+    pub strip_auto_increment: bool,
     pub include_views: bool,
     pub include_routines: bool,
     pub include_triggers: bool,
     pub include_events: bool,
-    /// INSERT IGNORE instead of INSERT.
-    pub insert_ignore: bool,
+    /// How duplicate rows are handled on import.
+    pub data_statement: DataStatement,
+    /// Empty the table (`TRUNCATE` / `DELETE FROM`) before its data rows.
+    pub truncate_before: bool,
     /// Blobs as `0x…` instead of `_binary'…'`.
     pub hex_blobs: bool,
 }
@@ -69,17 +98,23 @@ impl Default for SqlDumpOptions {
             tables: None,
             what: DumpWhat::StructureAndData,
             drop_add: true,
+            drop_database: false,
             add_locks: true,
             complete_inserts: false,
             extended_inserts: true,
+            batch_rows: 1000,
+            max_insert_size_kb: 1024,
+            delay_ms: 0,
             use_transactions: false,
             create_db_header: true,
             definer_strip: true,
+            strip_auto_increment: true,
             include_views: true,
             include_routines: false,
             include_triggers: false,
             include_events: false,
-            insert_ignore: false,
+            data_statement: DataStatement::Insert,
+            truncate_before: false,
             hex_blobs: false,
         }
     }
@@ -125,9 +160,60 @@ pub fn create_db_sql(db: &str) -> String {
     )
 }
 
+/// `DROP DATABASE IF EXISTS` before a CREATE DATABASE header — MySQL only:
+/// PostgreSQL cannot drop a database from inside one, and SQLite has no
+/// container databases.
+pub fn drop_database_sql(db: &str, dialect: SqlDialect) -> Option<String> {
+    match dialect {
+        SqlDialect::Mysql => Some(format!("DROP DATABASE IF EXISTS {};\n", quote_ident(db))),
+        _ => None,
+    }
+}
+
+/// Empty one table before its rows are re-inserted ("Delete data before
+/// insert"). SQLite has no TRUNCATE, so it gets a plain DELETE.
+pub fn truncate_table_sql(db: &str, table: &str, dialect: SqlDialect) -> String {
+    match dialect {
+        // quote_qualified is MySQL-flavoured; PG identifiers need double
+        // quotes (same as the DROP VIEW branches in the orchestrator).
+        SqlDialect::Mysql => format!("TRUNCATE TABLE {};\n", quote_qualified(&[db, table])),
+        SqlDialect::Postgres => format!("TRUNCATE TABLE \"{db}\".\"{table}\";\n"),
+        SqlDialect::Sqlite => format!("DELETE FROM {};\n", quote_ident(table)),
+    }
+}
+
 /// Bare `USE `db`;`.
 pub fn sql_use_db(db: &str) -> String {
     format!("USE {}", quote_ident(db))
+}
+
+/// `DELETE FROM t WHERE pk = lit AND …;` for one data row — the DELETE half
+/// of DELETE+INSERT mode. `row` must be ordered like `column_names`.
+/// Returns `None` when the table has no primary key (the caller then skips
+/// the DELETE rather than matching whole rows).
+pub fn delete_row_sql(
+    table_q: &str,
+    column_names: &[String],
+    pk_columns: &[String],
+    row: &[RowValue],
+    dialect: SqlDialect,
+    hex_blobs: bool,
+) -> Option<String> {
+    let mut terms: Vec<String> = Vec::new();
+    for name in pk_columns {
+        let Some(idx) = column_names.iter().position(|c| c == name) else {
+            continue;
+        };
+        let literal = row
+            .get(idx)
+            .map(|v| sql_literal_for(dialect, v, hex_blobs))
+            .unwrap_or_else(|| "NULL".to_string());
+        terms.push(format!("{} = {}", quote_ident(name), literal));
+    }
+    if terms.is_empty() {
+        return None;
+    }
+    Some(format!("DELETE FROM {table_q} WHERE {};\n", terms.join(" AND ")))
 }
 
 // ---------------------------------------------------------------------------
@@ -239,14 +325,20 @@ const EXTENDED_BATCH_BYTES: usize = 1024 * 1024;
 
 /// Accumulates data rows into INSERT statement text honouring the
 /// extended-insert options. One row of values is rendered at a time; at
-/// most one open batch (≈1000 rows / ≈1 MB) is buffered.
+/// most one open batch (≈batch_rows rows / ≈max_insert_size bytes) is
+/// buffered.
 pub struct InsertBatcher {
     table_q: String,
     column_list: String,
+    columns: Vec<String>,
     extended: bool,
-    insert_ignore: bool,
+    mode: DataStatement,
     hex_blobs: bool,
     dialect: SqlDialect,
+    batch_rows: usize,
+    batch_bytes: usize,
+    /// PostgreSQL REPLACE target: `ON CONFLICT (…) DO UPDATE SET …` tail.
+    pg_upsert_cols: Option<Vec<String>>,
     out: String,
     rows_in_batch: usize,
 }
@@ -275,10 +367,18 @@ impl InsertBatcher {
         Self {
             table_q: table_q.to_string(),
             column_list,
+            columns: columns.to_vec(),
             extended,
-            insert_ignore,
+            mode: if insert_ignore {
+                DataStatement::InsertIgnore
+            } else {
+                DataStatement::Insert
+            },
             hex_blobs,
             dialect: SqlDialect::Mysql,
+            batch_rows: EXTENDED_BATCH_ROWS,
+            batch_bytes: EXTENDED_BATCH_BYTES,
+            pg_upsert_cols: None,
             out: String::new(),
             rows_in_batch: 0,
         }
@@ -292,11 +392,76 @@ impl InsertBatcher {
         self
     }
 
+    /// Statement flavour (INSERT / INSERT IGNORE / REPLACE / DELETE+INSERT).
+    pub fn with_mode(mut self, mode: DataStatement) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Extended-batch caps. Rows of 0/bytes of 0 fall back to the defaults.
+    pub fn with_batch_limits(mut self, rows: u32, bytes_kb: u32) -> Self {
+        if rows > 0 {
+            self.batch_rows = rows as usize;
+        }
+        if bytes_kb > 0 {
+            self.batch_bytes = bytes_kb as usize * 1024;
+        }
+        self
+    }
+
+    /// PostgreSQL `REPLACE` support: conflict target + DO UPDATE tail.
+    pub fn with_pg_upsert(mut self, pk_columns: &[String]) -> Self {
+        self.pg_upsert_cols = Some(pk_columns.to_vec());
+        self
+    }
+
+    /// DELETE+INSERT pairs cannot interleave DELETEs with a VALUES batch,
+    /// so that mode always renders one INSERT per row.
+    fn single_row(&self) -> bool {
+        !self.extended || self.mode == DataStatement::DeleteInsert
+    }
+
     fn verb(&self) -> &'static str {
-        if self.insert_ignore {
-            "INSERT IGNORE INTO"
-        } else {
-            "INSERT INTO"
+        match self.mode {
+            DataStatement::Insert | DataStatement::DeleteInsert => "INSERT INTO",
+            DataStatement::InsertIgnore => "INSERT IGNORE INTO",
+            // PostgreSQL has no REPLACE INTO: verb stays INSERT and the
+            // ON CONFLICT tail does the upsert (see statement_tail).
+            DataStatement::Replace => {
+                if self.dialect == SqlDialect::Postgres {
+                    "INSERT INTO"
+                } else {
+                    "REPLACE INTO"
+                }
+            }
+        }
+    }
+
+    /// Postfix for a finished statement — the PostgreSQL REPLACE fallback.
+    fn statement_tail(&self) -> String {
+        if self.mode != DataStatement::Replace || self.dialect != SqlDialect::Postgres {
+            return String::new();
+        }
+        match &self.pg_upsert_cols {
+            Some(pks) if !pks.is_empty() => {
+                let q = |c: &str| self.dialect.quote_ident(c);
+                let targets = pks.iter().map(|c| q(c)).collect::<Vec<_>>().join(", ");
+                let updates: Vec<String> = self
+                    .columns
+                    .iter()
+                    .filter(|c| !pks.contains(c))
+                    .map(|c| format!("{} = excluded.{}", q(c), q(c)))
+                    .collect();
+                if updates.is_empty() {
+                    format!(" ON CONFLICT ({targets}) DO NOTHING")
+                } else {
+                    format!(
+                        " ON CONFLICT ({targets}) DO UPDATE SET {}",
+                        updates.join(", ")
+                    )
+                }
+            }
+            _ => String::new(),
         }
     }
 
@@ -308,13 +473,14 @@ impl InsertBatcher {
             .collect::<Vec<_>>()
             .join(", ");
 
-        if !self.extended {
+        if self.single_row() {
             self.out.push_str(&format!(
-                "{} {}{} VALUES ({});\n",
+                "{} {}{} VALUES ({}){};\n",
                 self.verb(),
                 self.table_q,
                 self.column_list,
-                literals
+                literals,
+                self.statement_tail()
             ));
             return;
         }
@@ -334,13 +500,15 @@ impl InsertBatcher {
         self.out.push(')');
         self.rows_in_batch += 1;
 
-        if self.rows_in_batch >= EXTENDED_BATCH_ROWS || self.out.len() >= EXTENDED_BATCH_BYTES {
+        if self.rows_in_batch >= self.batch_rows || self.out.len() >= self.batch_bytes {
             self.close_batch();
         }
     }
 
     fn close_batch(&mut self) {
         if self.rows_in_batch > 0 {
+            let tail = self.statement_tail();
+            self.out.push_str(&tail);
             self.out.push_str(";\n");
             self.rows_in_batch = 0;
         }
@@ -495,6 +663,89 @@ mod tests {
         b.push_row(&[rv(RowValue::Int(5))]);
         let out = b.finish().unwrap();
         assert!(out.starts_with("INSERT IGNORE INTO `d`.`t` VALUES (5);"));
+    }
+
+    #[test]
+    fn replace_mode_switches_the_verb() {
+        let mut b = InsertBatcher::new("`d`.`t`", &["a".into()], false, false, false, false)
+            .with_mode(DataStatement::Replace);
+        b.push_row(&[rv(RowValue::Int(5))]);
+        assert!(b.finish().unwrap().starts_with("REPLACE INTO `d`.`t` VALUES (5);"));
+    }
+
+    #[test]
+    fn pg_replace_falls_back_to_upsert_tail() {
+        let mut b = InsertBatcher::new("\"d\".\"t\"", &["id".into(), "v".into()], false, false, false, false)
+            .with_dialect(SqlDialect::Postgres)
+            .with_mode(DataStatement::Replace)
+            .with_pg_upsert(&["id".to_string()]);
+        b.push_row(&[rv(RowValue::Int(1)), rv(RowValue::Str("x".into()))]);
+        let out = b.finish().unwrap();
+        assert!(out.starts_with("INSERT INTO \"d\".\"t\" VALUES (1, 'x')"), "{out}");
+        assert!(
+            out.contains("ON CONFLICT (\"id\") DO UPDATE SET \"v\" = excluded.\"v\";"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn pg_replace_without_pk_is_a_plain_insert() {
+        let mut b = InsertBatcher::new("\"d\".\"t\"", &["v".into()], false, false, false, false)
+            .with_dialect(SqlDialect::Postgres)
+            .with_mode(DataStatement::Replace);
+        b.push_row(&[rv(RowValue::Int(1))]);
+        let out = b.finish().unwrap();
+        assert!(out.starts_with("INSERT INTO \"d\".\"t\" VALUES (1);"), "{out}");
+    }
+
+    #[test]
+    fn delete_insert_mode_forces_single_row_statements() {
+        let mut b = InsertBatcher::new("`d`.`t`", &["a".into()], true, false, false, false)
+            .with_mode(DataStatement::DeleteInsert);
+        b.push_row(&[rv(RowValue::Int(1))]);
+        // An extended batcher alone would hold the row open; DeleteInsert
+        // must drain row-by-row so DELETEs can interleave.
+        let first = b.take_ready().expect("row drained immediately");
+        assert_eq!(first, "INSERT INTO `d`.`t` VALUES (1);\n");
+        b.push_row(&[rv(RowValue::Int(2))]);
+        assert!(b.finish().unwrap().contains("VALUES (2);"));
+    }
+
+    #[test]
+    fn batch_limits_are_configurable() {
+        let mut b = InsertBatcher::new("`d`.`t`", &["a".into()], true, false, false, false)
+            .with_batch_limits(3, 1024);
+        for i in 0..3 {
+            b.push_row(&[rv(RowValue::Int(i))]);
+        }
+        let ready = b.take_ready().expect("batch closed at configured cap");
+        assert_eq!(ready.matches('(').count(), 3);
+    }
+
+    #[test]
+    fn drop_database_only_for_mysql() {
+        assert_eq!(
+            drop_database_sql("shop", SqlDialect::Mysql).as_deref(),
+            Some("DROP DATABASE IF EXISTS `shop`;\n")
+        );
+        assert_eq!(drop_database_sql("shop", SqlDialect::Postgres), None);
+        assert_eq!(drop_database_sql("shop", SqlDialect::Sqlite), None);
+    }
+
+    #[test]
+    fn truncate_varies_by_dialect() {
+        assert_eq!(
+            truncate_table_sql("shop", "users", SqlDialect::Mysql),
+            "TRUNCATE TABLE `shop`.`users`;\n"
+        );
+        assert_eq!(
+            truncate_table_sql("shop", "users", SqlDialect::Postgres),
+            "TRUNCATE TABLE \"shop\".\"users\";\n"
+        );
+        assert_eq!(
+            truncate_table_sql("shop", "users", SqlDialect::Sqlite),
+            "DELETE FROM `users`;\n"
+        );
     }
 
     #[test]

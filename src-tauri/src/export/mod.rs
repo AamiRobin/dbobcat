@@ -17,6 +17,7 @@
 
 pub mod formatters;
 pub mod sql_dump;
+pub mod xlsx;
 
 use std::collections::HashMap;
 use std::io::Write as IoWrite;
@@ -37,7 +38,7 @@ use crate::connections::{
 use crate::error::{AppError, Result};
 
 use formatters::{make_formatter, CsvConfig, RowFormatter};
-use sql_dump::SqlDumpOptions;
+use sql_dump::{DataStatement, SqlDumpOptions};
 
 /// Progress event name (frontend listens via `@tauri-apps/api/event`).
 pub const PROGRESS_EVENT: &str = "export://progress";
@@ -68,6 +69,8 @@ pub enum ExportFormat {
     SqlReplaces,
     /// Copy-as UPDATE statements (needs PK columns among the exported ones).
     SqlUpdates,
+    /// Native Excel workbook (streaming ZIP+OOXML writer; file output only).
+    Xlsx,
 }
 
 impl ExportFormat {
@@ -86,6 +89,7 @@ impl ExportFormat {
             ExportFormat::SqlInserts => ("SQL", &["sql"]),
             ExportFormat::SqlReplaces => ("SQL REPLACE", &["sql"]),
             ExportFormat::SqlUpdates => ("SQL UPDATE", &["sql"]),
+            ExportFormat::Xlsx => ("Excel", &["xlsx"]),
         }
     }
 
@@ -200,7 +204,7 @@ pub fn end_export(id: u32) {
 
 enum SinkInner {
     File(std::io::BufWriter<std::fs::File>),
-    Gzip(GzEncoder<std::io::BufWriter<std::fs::File>>),
+    Gzip(Box<GzEncoder<std::io::BufWriter<std::fs::File>>>),
     Memory(Vec<u8>),
 }
 
@@ -316,7 +320,7 @@ impl ExportOutput {
                 })?;
                 let buffered = std::io::BufWriter::with_capacity(64 * 1024, file);
                 let inner = if *gzip {
-                    SinkInner::Gzip(GzEncoder::new(buffered, flate2::Compression::default()))
+                    SinkInner::Gzip(Box::new(GzEncoder::new(buffered, flate2::Compression::default())))
                 } else {
                     SinkInner::File(buffered)
                 };
@@ -585,6 +589,20 @@ pub async fn export_grid(
             "server-to-server export only supports the SQL INSERTS format".into(),
         ));
     }
+    // XLSX is a binary ZIP: clipboard text and server statements don't apply.
+    if format == ExportFormat::Xlsx && !matches!(destination, ExportDestination::File { .. }) {
+        end_export(id);
+        return Err(AppError::Db("XLSX export supports file destinations only".into()));
+    }
+    if format == ExportFormat::Xlsx {
+        let result = run_grid_xlsx_inner(
+            app, manager, conn_id, db, table, sql, selection, &destination, overwrite, id, &cancel,
+            started,
+        )
+        .await;
+        end_export(id);
+        return result;
+    }
 
     let result = run_grid_inner(
         app, manager, conn_id, db, table, sql, selection, format, &destination, &options,
@@ -689,6 +707,145 @@ async fn run_grid_inner(
     state.finish(&mut output)?;
 
     close_out(output, stats.rows, started, destination, app, manager, stats.cancelled, id).await
+}
+
+/// XLSX grid export: streams rows into the OOXML writer with the same
+/// selection / table / query sources as the text formats. File destinations
+/// only (checked upstream); `gzip` is ignored — the workbook is already a
+/// ZIP archive.
+#[allow(clippy::too_many_arguments)]
+async fn run_grid_xlsx_inner(
+    app: &AppHandle,
+    manager: &ConnectionManager,
+    conn_id: u32,
+    db: Option<String>,
+    table: Option<String>,
+    sql: Option<String>,
+    selection: Option<(Vec<String>, Vec<Vec<RowValue>>)>,
+    destination: &ExportDestination,
+    overwrite: bool,
+    id: u32,
+    cancel: &CancelToken,
+    started: Instant,
+) -> Result<ExportResult> {
+    let ExportDestination::File { path, .. } = destination else {
+        return Err(AppError::Db("XLSX export supports file destinations only".into()));
+    };
+
+    // Same open semantics as ExportOutput::open: existing file without the
+    // overwrite flag yields AppError::Exists so the UI can confirm.
+    let path_buf = PathBuf::from(path);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true);
+    if overwrite {
+        opts.create(true).truncate(true);
+    } else {
+        opts.create_new(true);
+    }
+    let file = opts.open(&path_buf).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            AppError::Exists(path_buf.display().to_string())
+        } else {
+            e.into()
+        }
+    })?;
+    // Rows stream one write_all() at a time; buffer so that isn't one
+    // syscall per row. BufWriter<File> implements Seek, which the ZIP
+    // central-directory needs at finish().
+    let buffered = std::io::BufWriter::with_capacity(64 * 1024, file);
+
+    let sheet_base = table.clone().unwrap_or_else(|| "result".to_string());
+    let mut writer = xlsx::StreamingXlsxWriter::new(buffered)?;
+    let mut reporter = ProgressReporter::new(app, id, 1);
+    reporter.emit_now("data", table.as_deref(), 0, 0);
+
+    let mut rows_done: u64 = 0;
+    let mut cancelled = false;
+
+    match selection {
+        Some((cols, sel_rows)) => {
+            writer.begin(&sheet_base, &cols)?;
+            for row in &sel_rows {
+                if cancel.is_cancelled() {
+                    cancelled = true;
+                    break;
+                }
+                writer.push_row(row)?;
+                rows_done += 1;
+            }
+        }
+        None => {
+            let source = match (&table, &sql) {
+                (Some(t), _) if !t.is_empty() => RowSource::Table {
+                    db: db.clone()
+                        .ok_or_else(|| AppError::Db("missing database for table export".into()))?,
+                    table: t.clone(),
+                },
+                (_, Some(s)) if !s.is_empty() => RowSource::Sql(s.clone()),
+                _ => {
+                    return Err(AppError::Db(
+                        "grid export needs a table, a SELECT statement, or selected rows".into(),
+                    ))
+                }
+            };
+            let mut begun = false;
+            let stats = stream_rows(
+                manager,
+                conn_id,
+                &source,
+                1000,
+                cancel,
+                |cols, rows, _base| {
+                    if !begun {
+                        let names: Vec<String> = cols.iter().map(|c| c.name.clone()).collect();
+                        writer.begin(&sheet_base, &names)?;
+                        begun = true;
+                    }
+                    for row in rows {
+                        writer.push_row(row)?;
+                    }
+                    rows_done += rows.len() as u64;
+                    reporter.emit_throttled("data", table.as_deref(), rows_done, 0);
+                    Ok(())
+                },
+            )
+            .await?;
+            rows_done = stats.rows;
+            cancelled = stats.cancelled;
+        }
+    }
+
+    // Flush the ZIP central directory through the BufWriter before sizing
+    // the file; a dropped BufWriter would flush silently, swallowing errors.
+    let (mut sink, _) = writer.finish()?;
+    sink.flush()?;
+    drop(sink);
+
+    // Bytes written: the ZIP central directory makes the final size unknown
+    // until finish; read it back from the file.
+    let bytes = std::fs::metadata(&path_buf).map(|m| m.len()).unwrap_or(0);
+
+    let phase = if cancelled { "cancelled" } else { "done" };
+    app.emit(
+        PROGRESS_EVENT,
+        ExportProgress {
+            id,
+            phase: phase.into(),
+            table: None,
+            rows_done,
+            total_tables: 1,
+            bytes,
+        },
+    )
+    .ok();
+
+    Ok(ExportResult {
+        bytes_written: bytes,
+        rows: rows_done,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        path: destination_path(destination),
+        cancelled,
+    })
 }
 
 /// Deferred formatter: `begin` waits for the first chunk because column
@@ -878,6 +1035,11 @@ async fn run_dump_inner(
         }
 
         if options.create_db_header && !data_only_to_server && dialect == SqlDialect::Mysql {
+            if options.drop_database {
+                if let Some(drop_db) = sql_dump::drop_database_sql(db, dialect) {
+                    output.write_str(&drop_db)?;
+                }
+            }
             output.write_str(&sql_dump::create_db_sql(db))?;
         }
 
@@ -898,8 +1060,13 @@ async fn run_dump_inner(
                 if options.drop_add {
                     output.write_str(&sql_dump::drop_table_sql(db, table))?;
                 }
-                output.write_str(&sql_dump::strip_auto_increment(&ddl.create_sql))?;
+                let create_sql = if options.strip_auto_increment {
+                    sql_dump::strip_auto_increment(&ddl.create_sql)
+                } else {
+                    ddl.create_sql.clone()
+                };
                 // SHOW CREATE text arrives without a trailing newline.
+                output.write_str(&create_sql)?;
                 output.write_str("\n\n")?;
             }
 
@@ -910,6 +1077,11 @@ async fn run_dump_inner(
                         "Dumping data",
                         &quote_qualified(&[db, table]),
                     ))?;
+                }
+                // TRUNCATE is DDL on MySQL (implicit commit) — it must run
+                // before any transaction/lock wrapper, not inside one.
+                if options.truncate_before && !data_only_to_server {
+                    output.write_str(&sql_dump::truncate_table_sql(db, table, dialect))?;
                 }
                 if options.add_locks && !data_only_to_server && dialect == SqlDialect::Mysql {
                     output.write_str(&sql_dump::lock_table_sql(db, table))?;
@@ -925,6 +1097,12 @@ async fn run_dump_inner(
                 }
 
                 let columns: Vec<String> = ddl.columns.iter().map(|c| c.name.clone()).collect();
+                let pk_columns: Vec<String> = ddl
+                    .indexes
+                    .iter()
+                    .filter(|ix| ix.kind == crate::connections::IndexKind::Primary)
+                    .flat_map(|ix| ix.columns.clone())
+                    .collect();
                 // Server targets requalify INSERTs with their own schema.
                 let table_q = match destination {
                     ExportDestination::Server { db: target_db, .. } => {
@@ -932,16 +1110,28 @@ async fn run_dump_inner(
                     }
                     _ => quote_qualified(&[db, table]),
                 };
+                let mode = options.data_statement;
+                // DELETE+INSERT pairs cannot live inside a VALUES batch.
+                let extended = options.extended_inserts && mode != DataStatement::DeleteInsert;
                 let mut batcher =
                     sql_dump::InsertBatcher::new(
                         &table_q,
                         &columns,
-                        options.extended_inserts,
+                        extended,
                         options.complete_inserts || data_only_to_server,
-                        options.insert_ignore,
+                        false,
                         options.hex_blobs,
                     )
-                    .with_dialect(dialect);
+                    .with_dialect(dialect)
+                    .with_mode(mode)
+                    .with_batch_limits(options.batch_rows, options.max_insert_size_kb);
+                if mode == DataStatement::Replace && dialect == SqlDialect::Postgres {
+                    batcher = batcher.with_pg_upsert(&pk_columns);
+                }
+                // Once per table, not per row: DELETE+INSERT without a PK
+                // silently degrades to plain INSERT (whole-row matching
+                // would be far too slow to be useful here).
+                let has_pk = !pk_columns.is_empty();
 
                 let mut rows_done = 0u64;
                 let stats = stream_rows(
@@ -952,12 +1142,43 @@ async fn run_dump_inner(
                     cancel,
                     |_cols, rows, _base| {
                         for row in rows {
+                            if mode == DataStatement::DeleteInsert && has_pk {
+                                if let Some(delete_sql) = sql_dump::delete_row_sql(
+                                    &table_q,
+                                    &columns,
+                                    &pk_columns,
+                                    row,
+                                    dialect,
+                                    options.hex_blobs,
+                                ) {
+                                    output.write_str(&delete_sql)?;
+                                }
+                            }
                             batcher.push_row(row);
+                            // In DELETE+INSERT mode each INSERT must drain
+                            // immediately so it stays after its own DELETE.
+                            if mode == DataStatement::DeleteInsert {
+                                if let Some(ready) = batcher.take_ready() {
+                                    output.write_str(&ready)?;
+                                    if options.delay_ms > 0 {
+                                        std::thread::sleep(Duration::from_millis(
+                                            options.delay_ms as u64,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        if mode != DataStatement::DeleteInsert {
+                            if let Some(ready) = batcher.take_ready() {
+                                output.write_str(&ready)?;
+                                if options.delay_ms > 0 {
+                                    std::thread::sleep(Duration::from_millis(
+                                        options.delay_ms as u64,
+                                    ));
+                                }
+                            }
                         }
                         rows_done += rows.len() as u64;
-                        if let Some(ready) = batcher.take_ready() {
-                            output.write_str(&ready)?;
-                        }
                         reporter.emit_throttled("data", Some(table), rows_done, output.bytes_so_far());
                         Ok(())
                     },

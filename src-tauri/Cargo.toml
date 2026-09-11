@@ -41,6 +41,8 @@ dirs = "6.0.0"
 csv = "1.3"
 flate2 = "1"
 regex = "1"
+# Streaming XLSX export: xlsx is a ZIP of XML parts written incrementally.
+zip = { version = "4.6", default-features = false, features = ["deflate"] }
 # AI assistant (Phase 12): OpenAI-compatible chat-completions client.
 # rustls to match the DB drivers' TLS stack; no default features to keep
 # native-tls and its platform stacks out of the build. Chunks are consumed

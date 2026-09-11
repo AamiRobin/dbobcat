@@ -649,6 +649,8 @@ export type ExportFormat =
   | "latex"
   | "php"
   | "textile"
+  /** Native Excel workbook (streaming OOXML writer; file output only). */
+  | "xlsx"
   | "sql_inserts"
   /** Copy-as variant of sql_inserts (`REPLACE INTO`). */
   | "sql_replaces"
@@ -700,21 +702,41 @@ export interface SqlDumpOptions {
   tables?: string[] | null;
   what: DumpWhat;
   dropAdd: boolean;
+  /** Emit DROP DATABASE IF EXISTS before the CREATE DATABASE header (MySQL). */
+  dropDatabase: boolean;
   addLocks: boolean;
   completeInserts: boolean;
   extendedInserts: boolean;
+  /** Rows per extended INSERT statement. */
+  batchRows: number;
+  /** Soft KB cap per extended INSERT (stay under max_allowed_packet). */
+  maxInsertSizeKb: number;
+  /** Milliseconds to sleep between emitted INSERT statements. */
+  delayMs: number;
   useTransactions: boolean;
   createDbHeader: boolean;
   definerStrip: boolean;
+  /** Strip AUTO_INCREMENT=N from CREATE TABLE. */
+  stripAutoIncrement: boolean;
   includeViews: boolean;
   includeRoutines: boolean;
   includeTriggers: boolean;
   includeEvents: boolean;
-  insertIgnore: boolean;
+  /** How duplicate rows are handled on import. */
+  dataStatement: DataStatement;
+  /** Empty the table before re-inserting its rows. */
+  truncateBefore: boolean;
   hexBlobs: boolean;
 }
 
 export type DumpWhat = "structure_and_data" | "structure" | "data";
+
+/** Heidi-style "Data" statement flavour for dumps. */
+export type DataStatement =
+  | "insert"
+  | "insert_ignore"
+  | "replace"
+  | "delete_insert";
 
 /** Per-object request for DDL export (designer parity). */
 export interface DdlObjectRequest {

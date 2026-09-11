@@ -14,16 +14,11 @@ import {
   Hash,
   List,
   Server,
+  Table2,
   X,
 } from "lucide-react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -39,6 +34,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -46,7 +48,13 @@ import { dbKeys, fetchTables, TREE_STALE_TIME } from "@/lib/db-queries";
 import { t } from "@/lib/i18n";
 import { notify } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { cancelExport, fileDestination, formatFilters, pickSavePath } from "@/lib/export-queries";
+import {
+  cancelExport,
+  defaultSqlDumpOptions,
+  fileDestination,
+  formatFilters,
+  pickSavePath,
+} from "@/lib/export-queries";
 import { onBackendEvent, ipc } from "@/lib/ipc";
 import { log } from "@/stores/log";
 import { useConnectionStore } from "@/stores/connection";
@@ -67,6 +75,7 @@ const FORMAT_CARDS: {
   icon: typeof FileText;
 }[] = [
   { value: "csv", label: "CSV", icon: FileSpreadsheet },
+  { value: "xlsx", label: "XLSX", icon: Table2 },
   { value: "tsv", label: "TSV", icon: List },
   { value: "json", label: "JSON", icon: Braces },
   { value: "xml", label: "XML", icon: Code },
@@ -78,20 +87,15 @@ const FORMAT_CARDS: {
   { value: "sql_inserts", label: "SQL INSERTs", icon: Database },
 ];
 
-const DUMP_FLAGS: { key: keyof SqlDumpOptions; label: string }[] = [
-  { key: "dropAdd", label: "DROP TABLE IF EXISTS" },
-  { key: "addLocks", label: "Lock tables around data" },
-  { key: "completeInserts", label: "Complete INSERTs (column lists)" },
-  { key: "extendedInserts", label: "Extended INSERTs (batched VALUES)" },
-  { key: "useTransactions", label: "Wrap data in transactions" },
-  { key: "createDbHeader", label: "CREATE DATABASE / USE header" },
-  { key: "definerStrip", label: "Strip DEFINER clauses" },
-  { key: "includeViews", label: "Include views" },
-  { key: "includeRoutines", label: "Include routines" },
-  { key: "includeTriggers", label: "Include triggers" },
-  { key: "includeEvents", label: "Include events" },
-  { key: "insertIgnore", label: "INSERT IGNORE" },
-  { key: "hexBlobs", label: "Blobs as 0x hex" },
+const DATA_STATEMENT_ITEMS: {
+  value: SqlDumpOptions["dataStatement"];
+  label: string;
+  hint: string;
+}[] = [
+  { value: "insert", label: "INSERT", hint: "plain inserts" },
+  { value: "insert_ignore", label: "INSERT IGNORE", hint: "skip duplicate-key rows" },
+  { value: "replace", label: "REPLACE", hint: "overwrite duplicate rows" },
+  { value: "delete_insert", label: "DELETE + INSERT", hint: "delete each row by PK, then insert" },
 ];
 
 function formatBytes(n: number): string {
@@ -146,32 +150,30 @@ function ExportDialogInner({
     request.kind === "grid" && request.columns != null && request.rows != null;
   const [range, setRange] = useState<"all" | "selection">("all");
 
+  // XLSX is a binary workbook: it can only land in a file.
+  const xlsxFileOnly = request.kind === "grid" && format === "xlsx";
+
+  // Switching to XLSX while a clipboard/server destination is selected
+  // snaps the destination back to File (the radios disable either way).
+  useEffect(() => {
+    if (xlsxFileOnly && destKind !== "file") setDestKind("file");
+  }, [xlsxFileOnly, destKind]);
+
   // -- SQL dump options ------------------------------------------------------
   const [dump, setDump] = useState<SqlDumpOptions>(() =>
     request.kind === "dump"
-      ? {
-          dbs: request.dbs,
-          tables: request.tables,
-          what: "structure_and_data",
-          dropAdd: true,
-          addLocks: true,
-          completeInserts: false,
-          extendedInserts: true,
-          useTransactions: false,
-          createDbHeader: true,
-          definerStrip: true,
-          includeViews: true,
-          includeRoutines: false,
-          includeTriggers: false,
-          includeEvents: false,
-          insertIgnore: false,
-          hexBlobs: false,
-        }
+      ? { ...defaultSqlDumpOptions(request.dbs), tables: request.tables }
       : ({} as SqlDumpOptions),
   );
 
+  // Grid CSV options (Heidi-style delimiter/encloser/NULL handling).
+  const [csvDelimiter, setCsvDelimiter] = useState(",");
+  const [csvQuote, setCsvQuote] = useState('"');
+  const [csvNullText, setCsvNullText] = useState("");
+
   // Table checklist for whole-database dumps; seeded from the tree cache.
   const connId = useConnectionStore((s) => s.connId) ?? request.connId;
+  const dialect = useConnectionStore((s) => s.serverInfo?.dialect ?? "mysql");
   const needsTableList = request.kind === "dump" && request.tables === null;
   const tablesQuery = useQueryTables(connId, needsTableList ? request.dbs[0] : null);
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
@@ -233,6 +235,10 @@ function ExportDialogInner({
 
     if (request.kind === "grid") {
       const useSelection = hasClientRows && range === "selection";
+      const csvOptions =
+        format === "csv" || format === "tsv"
+          ? { delimiter: csvDelimiter, quote: csvQuote, nullText: csvNullText }
+          : {};
       return {
         connId: request.connId,
         db: request.db,
@@ -242,7 +248,7 @@ function ExportDialogInner({
         selectionRows: useSelection ? request.rows : null,
         format,
         destination,
-        options: {},
+        options: csvOptions,
         overwrite,
       };
     }
@@ -318,7 +324,12 @@ function ExportDialogInner({
 
   async function browse() {
     const stem = suggestedFileName();
-    const chosen = await pickSavePath(`${stem}.${extFor(format)}`, formatFilters(format));
+    // Database dumps are always SQL — the format cards don't apply to them.
+    const effectiveFormat: ExportFormat = request.kind === "dump" ? "sql_inserts" : format;
+    const chosen = await pickSavePath(
+      `${stem}.${extFor(effectiveFormat)}`,
+      formatFilters(effectiveFormat),
+    );
     if (chosen) setPath(chosen);
   }
 
@@ -377,8 +388,8 @@ function ExportDialogInner({
           </AlertDialogDescription>
         </AlertDialogHeader>
 
-        {/* ---- format ---- */}
-        {request.kind !== "ddl" && (
+        {/* ---- format (grid/table exports; dumps are always SQL) ---- */}
+        {request.kind === "grid" && (
           <section>
             <p className="mb-1.5 text-xs font-medium text-muted-foreground">
               Format
@@ -388,7 +399,13 @@ function ExportDialogInner({
                 <button
                   key={value}
                   type="button"
-                  onClick={() => setFormat(value)}
+                  onClick={() => {
+                    setFormat(value);
+                    // TSV's whole point is tab separators; switching formats
+                    // keeps the delimiter consistent with the choice.
+                    if (value === "tsv" && csvDelimiter === ",") setCsvDelimiter("\t");
+                    if (value === "csv" && csvDelimiter === "\t") setCsvDelimiter(",");
+                  }}
                   className={cn(
                     "flex flex-col items-center gap-1 rounded-md border px-1 py-2 text-[10px] transition-colors",
                     format === value
@@ -426,14 +443,86 @@ function ExportDialogInner({
           </Field>
         )}
 
-        {/* ---- SQL dump options ---- */}
+        {/* ---- CSV options (grid exports) ---- */}
+        {request.kind === "grid" && (format === "csv" || format === "tsv") && (
+          <section className="flex flex-col gap-2 rounded-md border p-2.5">
+            <p className="text-xs font-medium text-muted-foreground">CSV options</p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+              <label className="flex items-center gap-1.5 text-muted-foreground">
+                Delimiter
+                <Select
+                  value={csvDelimiter}
+                  onValueChange={(v) => setCsvDelimiter(v)}
+                >
+                  <SelectTrigger className="h-7 w-24 font-mono text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value=",">, (comma)</SelectItem>
+                    <SelectItem value=";">; (semicolon)</SelectItem>
+                    <SelectItem value={"\t"}>Tab</SelectItem>
+                    <SelectItem value="|">| (pipe)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="flex items-center gap-1.5 text-muted-foreground">
+                Enclose in
+                <Select value={csvQuote} onValueChange={(v) => setCsvQuote(v)}>
+                  <SelectTrigger className="h-7 w-24 font-mono text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={'"'}>" (double)</SelectItem>
+                    <SelectItem value="'">' (single)</SelectItem>
+                    <SelectItem value={"`"}>` (backtick)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="flex items-center gap-1.5 text-muted-foreground">
+                NULL as
+                <Input
+                  value={csvNullText}
+                  onChange={(e) => setCsvNullText(e.target.value)}
+                  placeholder="(empty)"
+                  className="h-7 w-24 px-1.5 font-mono text-xs"
+                />
+              </label>
+            </div>
+          </section>
+        )}
+
+        {/* ---- SQL dump options (Heidi-style groups) ---- */}
         {request.kind === "dump" && (
-          <Accordion type="single" collapsible>
-            <AccordionItem value="opts">
-              <AccordionTrigger className="py-2 text-xs">
-                SQL options
-              </AccordionTrigger>
-              <AccordionContent className="flex flex-col gap-3">
+          <section className="flex flex-col gap-2">
+            <p className="text-xs font-medium text-muted-foreground">SQL options</p>
+
+            {/* Database */}
+            <div className="rounded-md border">
+              <p className="border-b bg-muted/30 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Database
+              </p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 p-2">
+                <OptCheck
+                  label="CREATE DATABASE + USE header"
+                  checked={dump.createDbHeader}
+                  onChange={(v) => setDump({ ...dump, createDbHeader: v })}
+                />
+                {dialect === "mysql" && (
+                  <OptCheck
+                    label="DROP database first (dangerous)"
+                    checked={dump.dropDatabase}
+                    onChange={(v) => setDump({ ...dump, dropDatabase: v })}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Structure */}
+            <div className="rounded-md border">
+              <p className="border-b bg-muted/30 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Tables &amp; structure
+              </p>
+              <div className="flex flex-col gap-2 p-2">
                 <ToggleGroup
                   type="single"
                   variant="outline"
@@ -454,68 +543,223 @@ function ExportDialogInner({
                     {t("export.dump.what.data")}
                   </ToggleGroupItem>
                 </ToggleGroup>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  <OptCheck
+                    label="DROP TABLE IF EXISTS"
+                    checked={dump.dropAdd}
+                    onChange={(v) => setDump({ ...dump, dropAdd: v })}
+                  />
+                  <OptCheck
+                    label="Include views"
+                    checked={dump.includeViews}
+                    onChange={(v) => setDump({ ...dump, includeViews: v })}
+                  />
+                  <OptCheck
+                    label="Strip AUTO_INCREMENT counter"
+                    checked={dump.stripAutoIncrement}
+                    onChange={(v) => setDump({ ...dump, stripAutoIncrement: v })}
+                  />
+                  <OptCheck
+                    label="Strip DEFINER clauses"
+                    checked={dump.definerStrip}
+                    onChange={(v) => setDump({ ...dump, definerStrip: v })}
+                  />
+                </div>
+              </div>
+            </div>
 
-                <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-                  {DUMP_FLAGS.map(({ key, label }) => (
+            {/* Data */}
+            {dump.what !== "structure" && (
+              <div className="rounded-md border">
+                <p className="border-b bg-muted/30 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Data
+                </p>
+                <div className="flex flex-col gap-2 p-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="w-20 shrink-0 text-muted-foreground">Statement</span>
+                    <Select
+                      value={dump.dataStatement}
+                      onValueChange={(v) =>
+                        v &&
+                        setDump({
+                          ...dump,
+                          dataStatement: v as SqlDumpOptions["dataStatement"],
+                        })
+                      }
+                    >
+                      <SelectTrigger className="h-7 w-44 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DATA_STATEMENT_ITEMS.map((it) => (
+                          <SelectItem key={it.value} value={it.value}>
+                            {it.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-[10px] text-muted-foreground">
+                      {
+                        DATA_STATEMENT_ITEMS.find(
+                          (it) => it.value === dump.dataStatement,
+                        )?.hint
+                      }
+                      {dump.dataStatement === "replace" &&
+                        dialect === "postgres" &&
+                        " (upsert via ON CONFLICT — needs a primary key)"}
+                      {dump.dataStatement === "delete_insert" &&
+                        " (needs a primary key)"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    <OptCheck
+                      label="Complete INSERTs (column lists)"
+                      checked={dump.completeInserts}
+                      onChange={(v) => setDump({ ...dump, completeInserts: v })}
+                    />
+                    <OptCheck
+                      label="Extended INSERTs (batched VALUES)"
+                      checked={dump.extendedInserts}
+                      onChange={(v) => setDump({ ...dump, extendedInserts: v })}
+                    />
+                    <OptCheck
+                      label="Delete (truncate) data before insert"
+                      checked={dump.truncateBefore}
+                      onChange={(v) => setDump({ ...dump, truncateBefore: v })}
+                    />
+                    <OptCheck
+                      label="Wrap data in transactions"
+                      checked={dump.useTransactions}
+                      onChange={(v) => setDump({ ...dump, useTransactions: v })}
+                    />
+                    {dialect === "mysql" && (
+                      <OptCheck
+                        label="Lock tables around data"
+                        checked={dump.addLocks}
+                        onChange={(v) => setDump({ ...dump, addLocks: v })}
+                      />
+                    )}
+                    <OptCheck
+                      label="Blobs as 0x hex"
+                      checked={dump.hexBlobs}
+                      onChange={(v) => setDump({ ...dump, hexBlobs: v })}
+                    />
+                  </div>
+                  {dump.extendedInserts && (
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground">
+                      <label className="flex items-center gap-1.5">
+                        Max INSERT size
+                        <Input
+                          type="number"
+                          min={1}
+                          value={dump.maxInsertSizeKb}
+                          onChange={(e) =>
+                            setDump({
+                              ...dump,
+                              maxInsertSizeKb: Number(e.target.value) || 0,
+                            })
+                          }
+                          className="h-6 w-20 px-1.5 font-mono text-xs"
+                        />
+                        KB
+                      </label>
+                      <label className="flex items-center gap-1.5">
+                        Rows per statement
+                        <Input
+                          type="number"
+                          min={1}
+                          value={dump.batchRows}
+                          onChange={(e) =>
+                            setDump({ ...dump, batchRows: Number(e.target.value) || 0 })
+                          }
+                          className="h-6 w-20 px-1.5 font-mono text-xs"
+                        />
+                      </label>
+                      <label className="flex items-center gap-1.5">
+                        Delay between statements
+                        <Input
+                          type="number"
+                          min={0}
+                          value={dump.delayMs}
+                          onChange={(e) =>
+                            setDump({ ...dump, delayMs: Number(e.target.value) || 0 })
+                          }
+                          className="h-6 w-20 px-1.5 font-mono text-xs"
+                        />
+                        ms
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Objects */}
+            <div className="rounded-md border">
+              <p className="border-b bg-muted/30 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Related objects
+              </p>
+              <div className="grid grid-cols-3 gap-x-4 gap-y-1.5 p-2">
+                <OptCheck
+                  label="Routines"
+                  checked={dump.includeRoutines}
+                  onChange={(v) => setDump({ ...dump, includeRoutines: v })}
+                />
+                <OptCheck
+                  label="Triggers"
+                  checked={dump.includeTriggers}
+                  onChange={(v) => setDump({ ...dump, includeTriggers: v })}
+                />
+                <OptCheck
+                  label="Events"
+                  checked={dump.includeEvents}
+                  onChange={(v) => setDump({ ...dump, includeEvents: v })}
+                />
+              </div>
+            </div>
+
+            {needsTableList && tablesQuery.data && tablesQuery.data.length > 0 && (
+              <div className="rounded-md border">
+                <div className="flex items-center justify-between border-b px-2 py-1.5">
+                  <span className="text-xs font-medium">
+                    Tables ({selectedTables.size}/{tablesQuery.data.length})
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() =>
+                      setSelectedTables(
+                        selectedTables.size === tablesQuery.data!.length
+                          ? new Set()
+                          : new Set(tablesQuery.data!),
+                      )
+                    }
+                  >
+                    Toggle all
+                  </Button>
+                </div>
+                <div className="grid max-h-36 grid-cols-2 gap-x-4 overflow-auto p-2">
+                  {tablesQuery.data.map((name) => (
                     <label
-                      key={String(key)}
-                      className="flex items-center gap-2 text-xs text-muted-foreground"
+                      key={name}
+                      className="flex items-center gap-1.5 py-0.5 text-xs"
                     >
                       <Checkbox
-                        checked={Boolean(dump[key])}
-                        onCheckedChange={(v) =>
-                          setDump({ ...dump, [key]: v === true })
-                        }
+                        checked={selectedTables.has(name)}
+                        onCheckedChange={(v) => {
+                          const next = new Set(selectedTables);
+                          if (v === true) next.add(name);
+                          else next.delete(name);
+                          setSelectedTables(next);
+                        }}
                       />
-                      {label}
+                      <span className="truncate font-mono">{name}</span>
                     </label>
                   ))}
                 </div>
-
-                {needsTableList && tablesQuery.data && tablesQuery.data.length > 0 && (
-                  <div className="rounded-md border">
-                    <div className="flex items-center justify-between border-b px-2 py-1.5">
-                      <span className="text-xs font-medium">
-                        Tables ({selectedTables.size}/{tablesQuery.data.length})
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() =>
-                          setSelectedTables(
-                            selectedTables.size === tablesQuery.data!.length
-                              ? new Set()
-                              : new Set(tablesQuery.data!),
-                          )
-                        }
-                      >
-                        Toggle all
-                      </Button>
-                    </div>
-                    <div className="grid max-h-36 grid-cols-2 gap-x-4 overflow-auto p-2">
-                      {tablesQuery.data.map((name) => (
-                        <label
-                          key={name}
-                          className="flex items-center gap-1.5 py-0.5 text-xs"
-                        >
-                          <Checkbox
-                            checked={selectedTables.has(name)}
-                            onCheckedChange={(v) => {
-                              const next = new Set(selectedTables);
-                              if (v === true) next.add(name);
-                              else next.delete(name);
-                              setSelectedTables(next);
-                            }}
-                          />
-                          <span className="truncate font-mono">{name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
+              </div>
+            )}
+          </section>
         )}
 
         <Separator />
@@ -544,9 +788,17 @@ function ExportDialogInner({
                 <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
                   {path ?? "no file chosen"}
                 </span>
-                <label className="ml-auto flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                <label
+                  className="ml-auto flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+                  title={
+                    format === "xlsx"
+                      ? "XLSX is already a ZIP archive — gzip does not apply"
+                      : undefined
+                  }
+                >
                   <Checkbox
-                    checked={gzip}
+                    checked={gzip && !xlsxFileOnly}
+                    disabled={xlsxFileOnly}
                     onCheckedChange={(v) => setGzip(v === true)}
                   />
                   gzip .gz
@@ -555,8 +807,8 @@ function ExportDialogInner({
             </div>
 
             <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
-              <RadioGroupItem value="clipboard" />
-              Clipboard
+              <RadioGroupItem value="clipboard" disabled={xlsxFileOnly} />
+              <span className={cn(xlsxFileOnly && "opacity-50")}>Clipboard</span>
               <span className="pl-2 text-xs text-muted-foreground">
                 up to 50 MB
               </span>
@@ -566,9 +818,9 @@ function ExportDialogInner({
               <label className="flex items-center gap-2">
                 <RadioGroupItem
                   value="server"
-                  disabled={request.kind === "ddl"}
+                  disabled={request.kind === "ddl" || xlsxFileOnly}
                 />
-                <span className={request.kind === "ddl" ? "opacity-50" : ""}>
+                <span className={request.kind === "ddl" || xlsxFileOnly ? "opacity-50" : ""}>
                   Another server connection
                 </span>
               </label>
@@ -668,11 +920,30 @@ function extFor(format: ExportFormat): string {
     latex: "tex",
     php: "php",
     textile: "txt",
+    xlsx: "xlsx",
     sql_inserts: "sql",
     sql_replaces: "sql",
     sql_updates: "sql",
   };
   return map[format];
+}
+
+/** One labelled checkbox row used across the dump option groups. */
+function OptCheck({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Checkbox checked={checked} onCheckedChange={(v) => onChange(v === true)} />
+      {label}
+    </label>
+  );
 }
 
 /** Cached base-table names of one database, fetched through TanStack. */

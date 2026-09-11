@@ -926,6 +926,9 @@ pub fn make_formatter(
             pk_columns.to_vec(),
             hex_blobs,
         )),
+        // Unreachable: export_grid routes XLSX to the dedicated streaming
+        // writer before any text formatter is constructed.
+        ExportFormat::Xlsx => unreachable!("xlsx has no text formatter"),
     }
 }
 
