@@ -34,6 +34,9 @@ function rowAnchorY(box: CardBox, columnName: string): number {
 const FOOT_DEPTH = 7;
 const FOOT_HALF_WIDTH = 5;
 
+const TICK_DEPTH = 7;
+const TICK_HALF_WIDTH = 5;
+
 /**
  * Crow's-foot prongs at `tip` (on the card border), opening AWAY from the
  * card along `-angle`. Returns the polyline "M p1 L tip L p2"; renderers
@@ -59,11 +62,33 @@ export function crowFootPath(tip: Point, angle: number): string {
   return `M ${fmt(p1.x)} ${fmt(p1.y)} L ${fmt(tip.x)} ${fmt(tip.y)} L ${fmt(p2.x)} ${fmt(p2.y)}`;
 }
 
+/**
+ * "One" marker at the parent end: a short perpendicular tick sitting
+ * TICK_DEPTH into the edge, completing the crow's-foot notation pair
+ * (tick = exactly one, foot = many). `angle` is the edge's outgoing
+ * tangent at the parent anchor (pointing away from the parent card).
+ */
+export function oneTickPath(anchor: Point, angle: number): string {
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  const px = -dy;
+  const py = dx;
+  const cx = anchor.x + dx * TICK_DEPTH;
+  const cy = anchor.y + dy * TICK_DEPTH;
+  const fmt = (n: number) => n.toFixed(2);
+  return (
+    `M ${fmt(cx + px * TICK_HALF_WIDTH)} ${fmt(cy + py * TICK_HALF_WIDTH)} ` +
+    `L ${fmt(cx - px * TICK_HALF_WIDTH)} ${fmt(cy - py * TICK_HALF_WIDTH)}`
+  );
+}
+
 export interface EdgeGeometry {
   /** Cubic bezier from parent anchor to child anchor. */
   d: string;
   /** Crow's-foot prongs at the child end (null → plain line end). */
   foot: string | null;
+  /** "Exactly one" tick at the parent end (null for composite edges). */
+  oneTick: string | null;
   /** Fill the foot (mandatory child) vs stroke it (nullable child). */
   filled: boolean;
   /** Midpoint approximation — hover-label chip anchor. */
@@ -130,6 +155,10 @@ export function computeEdgeGeometry(
   const angle = horizontal
     ? Math.atan2(0, to.x - cx2)
     : Math.atan2(to.y - cy2, 0);
+  // Outgoing tangent at the parent end (anchor → first control point).
+  const parentAngle = horizontal
+    ? Math.atan2(0, cx1 - from.x)
+    : Math.atan2(cy1 - from.y, 0);
 
   return {
     d,
@@ -137,6 +166,7 @@ export function computeEdgeGeometry(
       edge.composite || !edge.targetColumn
         ? null
         : crowFootPath(to, angle),
+    oneTick: edge.composite ? null : oneTickPath(from, parentAngle),
     filled: !edge.nullableChild && !edge.composite,
     labelPoint: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 },
   };

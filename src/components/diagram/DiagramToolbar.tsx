@@ -4,13 +4,16 @@ import {
   Image,
   Maximize,
   RefreshCw,
+  Search,
   Shrink,
   UnfoldVertical,
   FoldVertical,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -18,7 +21,8 @@ import { t } from "@/lib/i18n";
 
 /**
  * Diagram toolbar strip (h-8): fit / relayout / zoom display, keys-only
- * mode (ToggleGroup), collapse & expand all, the Export ▸ menu and refresh.
+ * mode (ToggleGroup), search-in-diagram, collapse & expand all, the
+ * Export ▸ menu and refresh.
  */
 export interface DiagramToolbarProps {
   zoom: number;
@@ -27,6 +31,12 @@ export interface DiagramToolbarProps {
   onKeysOnlyChange: (keysOnly: boolean) => void;
   onFit: () => void;
   onRelayout: () => void;
+  /** Live diagram search: matches table/column/type names. */
+  search: string;
+  onSearchChange: (value: string) => void;
+  /** "n/total" match counter label, or null when the box is empty. */
+  matchLabel: string | null;
+  onSearchZoom: () => void;
   onCollapseAll: () => void;
   onExpandAll: () => void;
   onExportPng: () => void;
@@ -89,6 +99,45 @@ export function DiagramToolbar(props: DiagramToolbarProps) {
           {t("er.toolbar.keysOnly")}
         </ToggleGroupItem>
       </ToggleGroup>
+
+      <Separator orientation="vertical" className="mx-1 h-4" />
+
+      {/* Search-in-diagram */}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
+        <Input
+          value={props.search}
+          onChange={(e) => props.onSearchChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              props.onSearchZoom();
+            }
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              props.onSearchChange("");
+            }
+          }}
+          placeholder={t("er.toolbar.search")}
+          aria-label={t("er.toolbar.search")}
+          className="h-6 w-40 border-none bg-transparent pl-6 pr-7 text-xs focus-visible:ring-1"
+        />
+        {props.search && (
+          <button
+            type="button"
+            aria-label={t("er.toolbar.searchClear")}
+            onClick={() => props.onSearchChange("")}
+            className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-accent"
+          >
+            <X className="size-3" />
+          </button>
+        )}
+      </div>
+      {props.matchLabel && (
+        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+          {props.matchLabel}
+        </span>
+      )}
 
       <Separator orientation="vertical" className="mx-1 h-4" />
 

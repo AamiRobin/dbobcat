@@ -21,6 +21,10 @@ export interface DiagramEdgesProps {
   geometries: Map<string, EdgeGeometry>;
   /** Node ids adjacent to the hovered element; all others dim. */
   highlightIds: Set<string> | null;
+  /** Node ids matching the search box; non-matching edges fade further. */
+  matchIds: Set<string> | null;
+  /** Node ids in the focus set; non-incident edges nearly vanish. */
+  focusIds: Set<string> | null;
   selectedId: string | null;
   onHoverEdge: (edge: DiagramEdge | null) => void;
 }
@@ -29,6 +33,8 @@ export const DiagramEdges = memo(function DiagramEdges({
   edges,
   geometries,
   highlightIds,
+  matchIds,
+  focusIds,
   selectedId,
   onHoverEdge,
 }: DiagramEdgesProps) {
@@ -37,16 +43,29 @@ export const DiagramEdges = memo(function DiagramEdges({
       {edges.map((edge) => {
         const geo = geometries.get(edge.id);
         if (!geo) return null;
-        const dimmed = highlightIds !== null && !highlightIds.has(edge.source) && !highlightIds.has(edge.target);
         const emphasized =
           highlightIds !== null && (highlightIds.has(edge.source) || highlightIds.has(edge.target));
+        const selected = selectedId === edge.id;
+        const hoverDimmed =
+          highlightIds !== null && !highlightIds.has(edge.source) && !highlightIds.has(edge.target);
+        const matchDimmed =
+          matchIds !== null && !matchIds.has(edge.source) && !matchIds.has(edge.target);
+        const focusDimmed =
+          focusIds !== null && !focusIds.has(edge.source) && !focusIds.has(edge.target);
+        // Strongest filter wins: focus nearly hides, search fades, hover dims.
+        // Literal classes only — a dynamic `opacity-${n}` would never be
+        // picked up by Tailwind's source scan.
+        const opacityClass = focusDimmed
+          ? "opacity-15"
+          : matchDimmed
+            ? "opacity-30"
+            : hoverDimmed
+              ? "opacity-40"
+              : "opacity-100";
         return (
           <g
             key={edge.id}
-            className={cn(
-              "transition-opacity",
-              dimmed ? "opacity-40" : "opacity-100",
-            )}
+            className={cn("transition-opacity", opacityClass)}
             onMouseEnter={() => onHoverEdge(edge)}
             onMouseLeave={() => onHoverEdge(null)}
           >
@@ -55,21 +74,23 @@ export const DiagramEdges = memo(function DiagramEdges({
             <path
               d={geo.d}
               fill="none"
-              strokeWidth={emphasized || selectedId === edge.id ? 2 : 1.25}
-              className={cn(
-                emphasized || selectedId === edge.id ? "stroke-primary" : "stroke-border",
-              )}
+              strokeWidth={emphasized || selected ? 2 : 1.25}
+              className={cn(emphasized || selected ? "stroke-primary" : "stroke-border")}
             />
+            {geo.oneTick && (
+              <path
+                d={geo.oneTick}
+                fill="none"
+                strokeWidth={1.25}
+                className={cn(emphasized || selected ? "stroke-primary" : "stroke-border")}
+              />
+            )}
             {geo.foot && (
               <path
                 d={geo.foot}
                 fill={geo.filled ? "var(--border)" : "none"}
                 strokeWidth={1.25}
-                className={
-                  emphasized || selectedId === edge.id
-                    ? "stroke-primary"
-                    : "stroke-border"
-                }
+                className={cn(emphasized || selected ? "stroke-primary" : "stroke-border")}
                 style={emphasized && geo.filled ? { fill: "var(--primary)" } : undefined}
               />
             )}

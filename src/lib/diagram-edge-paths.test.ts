@@ -8,6 +8,7 @@ import {
 import {
   computeEdgeGeometry,
   crowFootPath,
+  oneTickPath,
   type CardBox,
 } from "./diagram-edge-paths";
 
@@ -128,5 +129,32 @@ describe("edge foot selection", () => {
     const geo = computeEdgeGeometry(baseEdge, boxes)!;
     expect(geo.labelPoint.x).toBeCloseTo((CARD_WIDTH + 400) / 2, 5);
     expect(geo.labelPoint.y).toBeCloseTo(63, 5); // both mid-borders
+  });
+});
+
+describe("oneTickPath / parent cardinality", () => {
+  test("tick sits inside the edge, perpendicular to the outgoing tangent", () => {
+    // Outgoing direction +x (parent's right border): tick centre is 7px in,
+    // spanning ±5px in y.
+    const path = oneTickPath({ x: 100, y: 50 }, 0);
+    expect(path).toBe("M 107.00 55.00 L 107.00 45.00");
+  });
+
+  test("rotates with the tangent (downward edge)", () => {
+    const path = oneTickPath({ x: 100, y: 100 }, Math.PI / 2);
+    expect(path).toBe("M 95.00 107.00 L 105.00 107.00");
+  });
+
+  test("every non-composite edge carries a tick; composite does not", () => {
+    const boxes = { customers: box(0, 0), orders: box(400, 0) };
+    const plain = computeEdgeGeometry(baseEdge, boxes)!;
+    const composite = computeEdgeGeometry({ ...baseEdge, composite: true }, boxes)!;
+
+    expect(plain.oneTick).not.toBeNull();
+    // Tick lives near the PARENT anchor (the edge's start point).
+    const start = plain.d.match(/^M ([\d.]+) ([\d.]+)/)!.slice(1).map(Number);
+    const tick = plain.oneTick!.match(/^M ([\d.]+) ([\d.]+)/)!.slice(1).map(Number);
+    expect(tick[0]).toBeGreaterThan(start[0]); // into the edge, away from the card
+    expect(composite.oneTick).toBeNull();
   });
 });

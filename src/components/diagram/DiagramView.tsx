@@ -253,7 +253,10 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
   // -- interaction state ----------------------------------------------------------
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [hoveredEdge, setHoveredEdge] = useState<DiagramEdge | null>(null);
+  const [search, setSearch] = useState("");
+  const [focusId, setFocusId] = useState<string | null>(null);
   const fitRef = useRef<((animate?: boolean) => void) | null>(null);
+  const fitToRef = useRef<((ids: string[]) => void) | null>(null);
 
   // Auto-fit once the first non-empty layout lands.
   const fitted = useRef(false);
@@ -279,6 +282,43 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
     if (hoveredNode !== null) ids.add(hoveredNode);
     return ids;
   }, [hoveredNode, hoveredEdge, visibleEdges]);
+
+  // -- search-in-diagram: table/column/type names; matches stay, rest fades --
+  const matchIds = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return null;
+    const ids = new Set<string>();
+    for (const node of visibleNodes) {
+      if (node.id.toLowerCase().includes(q)) {
+        ids.add(node.id);
+        continue;
+      }
+      if (
+        node.columns.some(
+          (c) => c.name.toLowerCase().includes(q) || c.dataType.toLowerCase().includes(q),
+        )
+      ) {
+        ids.add(node.id);
+      }
+    }
+    return ids;
+  }, [search, visibleNodes]);
+
+  // -- focus mode: the anchor table plus its direct FK neighbours ---------------
+  const focusIds = useMemo(() => {
+    if (focusId === null) return null;
+    const ids = new Set<string>([focusId]);
+    for (const edge of visibleEdges) {
+      if (edge.source === focusId) ids.add(edge.target);
+      if (edge.target === focusId) ids.add(edge.source);
+    }
+    return ids;
+  }, [focusId, visibleEdges]);
+
+  const selectedEdge = useMemo(
+    () => (dia.selection ? visibleEdges.find((e) => e.id === dia.selection) ?? null : null),
+    [dia.selection, visibleEdges],
+  );
 
   // -- actions ----------------------------------------------------------------------
   const relayout = () => patch(tabId, { positions: {}, layoutNonce: dia.layoutNonce + 1 });
@@ -440,6 +480,19 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
         onKeysOnlyChange={(next) => patch(tabId, { keysOnly: next })}
         onFit={() => fitRef.current?.(false)}
         onRelayout={relayout}
+        search={search}
+        onSearchChange={(value) => {
+          setSearch(value);
+          if (value === "") setFocusId(null);
+        }}
+        matchLabel={
+          matchIds !== null && search.trim() !== ""
+            ? `${matchIds.size}/${visibleNodes.length}`
+            : null
+        }
+        onSearchZoom={() => {
+          if (matchIds !== null) fitToRef.current?.([...matchIds]);
+        }}
         onCollapseAll={collapseAll}
         onExpandAll={expandAll}
         onExportPng={() => void runExport("png")}
@@ -466,9 +519,14 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
           selectedId={dia.selection}
           hoveredId={hoveredNode}
           neighborIds={neighborIds}
+          matchIds={matchIds}
+          focusIds={focusIds}
+          focusedId={focusId}
           contentSize={contentSize}
           hoveredEdge={hoveredEdge}
+          selectedEdge={selectedEdge}
           onSelect={(id) => patch(tabId, { selection: id })}
+          onFocusChange={(id) => setFocusId(id)}
           onHoverCard={setHoveredNode}
           onHoverEdge={setHoveredEdge}
           onToggleCollapse={(id) => {
@@ -486,6 +544,9 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
           onOpenDesigner={(id) => openDesignerTab(connId, db, id)}
           registerFit={(fn) => {
             fitRef.current = fn;
+          }}
+          registerFitTo={(fn) => {
+            fitToRef.current = fn;
           }}
         />
       </div>

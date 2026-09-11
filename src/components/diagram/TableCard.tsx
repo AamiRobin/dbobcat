@@ -29,6 +29,8 @@ export interface TableCardProps {
   rows: NodeRows;
   collapsed: boolean;
   selected: boolean;
+  /** This card is the focus-mode anchor (stronger emphasis than selection). */
+  focused: boolean;
   dimmed: boolean;
   /** Drag/press start (pointerdown anywhere outside the buttons). */
   onPress: (nodeId: string, event: React.PointerEvent) => void;
@@ -37,6 +39,8 @@ export interface TableCardProps {
   onToggleCollapse: (nodeId: string) => void;
   onHide: (nodeId: string) => void;
   onOpenDesigner: (nodeId: string) => void;
+  /** Isolate this table + its FK neighbours (focus mode). */
+  onIsolate: (nodeId: string) => void;
 }
 
 export const TableCard = memo(function TableCard({
@@ -44,6 +48,7 @@ export const TableCard = memo(function TableCard({
   rows,
   collapsed,
   selected,
+  focused,
   dimmed,
   onPress,
   onSelect,
@@ -51,6 +56,7 @@ export const TableCard = memo(function TableCard({
   onToggleCollapse,
   onHide,
   onOpenDesigner,
+  onIsolate,
 }: TableCardProps) {
   const hasMore = !collapsed && rows.hiddenCount > 0;
   const bodyHeight = collapsed
@@ -83,9 +89,22 @@ export const TableCard = memo(function TableCard({
         height={bodyHeight}
         rx={6}
         className="fill-card stroke-border"
-        strokeWidth={selected ? 1.75 : 1}
-        stroke={selected ? "var(--primary)" : undefined}
+        strokeWidth={focused ? 2 : selected ? 1.75 : 1}
+        stroke={focused || selected ? "var(--primary)" : undefined}
       />
+      {focused && (
+        <rect
+          x={-3}
+          y={-3}
+          width={CARD_WIDTH + 6}
+          height={bodyHeight + 6}
+          rx={8}
+          fill="none"
+          className="stroke-primary/50"
+          strokeWidth={1}
+          style={{ pointerEvents: "none" }}
+        />
+      )}
 
       {/* Header */}
       <rect
@@ -124,6 +143,39 @@ export const TableCard = memo(function TableCard({
       >
         {truncate(node.id, CARD_WIDTH - 44)}
       </text>
+      {/* Isolate (focus mode) — appears on hover, left of the hide × */}
+      <g
+        className="cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"
+        onClick={(e) => {
+          e.stopPropagation();
+          onIsolate(node.id);
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <rect
+          x={CARD_WIDTH - 41}
+          y={3}
+          width={19}
+          height={CARD_HEADER_HEIGHT - 6}
+          rx={4}
+          className="fill-transparent"
+        />
+        {/* Crosshair: circle + 4 ticks */}
+        <circle
+          cx={CARD_WIDTH - 31.5}
+          cy={CARD_HEADER_HEIGHT / 2}
+          r={4}
+          fill="none"
+          className="stroke-muted-foreground"
+          strokeWidth={1.25}
+        />
+        <path
+          d={`M ${CARD_WIDTH - 31.5} ${CARD_HEADER_HEIGHT / 2 - 6.5} v 2.5 M ${CARD_WIDTH - 31.5} ${CARD_HEADER_HEIGHT / 2 + 4} v 2.5 M ${CARD_WIDTH - 38} ${CARD_HEADER_HEIGHT / 2} h 2.5 M ${CARD_WIDTH - 25} ${CARD_HEADER_HEIGHT / 2} h 2.5`}
+          className="stroke-muted-foreground"
+          strokeWidth={1.25}
+          strokeLinecap="round"
+        />
+      </g>
       {/* Hide × */}
       <g
         className="cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"

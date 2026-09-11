@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { X } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 import type { CardBox, EdgeGeometry } from "@/lib/diagram-edge-paths";
+import { CARD_WIDTH } from "@/lib/diagram-model";
 import type { DiagramEdge } from "@/lib/diagram-model";
 import type { DiagramNode } from "@/lib/diagram-model";
 import {
@@ -10,6 +14,7 @@ import {
   type DiagramPoint,
   type DiagramViewport,
 } from "@/stores/diagram";
+import { t } from "@/lib/i18n";
 
 import { DiagramEdges, EdgeLabelChip } from "./DiagramEdges";
 import { TableCard } from "./TableCard";
@@ -46,9 +51,18 @@ export interface DiagramCanvasProps {
   hoveredId: string | null;
   /** Nodes/edges adjacent to the hovered element; everything else dims. */
   neighborIds: Set<string> | null;
+  /** Nodes matching the live search; everything else fades. */
+  matchIds: Set<string> | null;
+  /** Focus set (anchor + FK neighbours); everything else nearly vanishes. */
+  focusIds: Set<string> | null;
+  /** The focus-mode anchor table, for the banner + ring. */
+  focusedId: string | null;
   contentSize: { width: number; height: number };
   hoveredEdge: DiagramEdge | null;
+  /** Edge matching the current selection (pinned label chip). */
+  selectedEdge: DiagramEdge | null;
   onSelect: (id: string | null) => void;
+  onFocusChange: (id: string | null) => void;
   onHoverCard: (id: string | null) => void;
   onHoverEdge: (edge: DiagramEdge | null) => void;
   onToggleCollapse: (id: string) => void;
@@ -56,6 +70,8 @@ export interface DiagramCanvasProps {
   onOpenDesigner: (id: string) => void;
   /** Registers the fit callback so the toolbar/double-click can trigger it. */
   registerFit: (fn: ((animate?: boolean) => void) | null) => void;
+  /** Registers zoom-to-node-set (search Enter). */
+  registerFitTo: (fn: ((ids: string[]) => void) | null) => void;
 }
 
 export function DiagramCanvas({
@@ -69,15 +85,21 @@ export function DiagramCanvas({
   selectedId,
   hoveredId,
   neighborIds,
+  matchIds,
+  focusIds,
+  focusedId,
   contentSize,
   hoveredEdge,
+  selectedEdge,
   onSelect,
+  onFocusChange,
   onHoverCard,
   onHoverEdge,
   onToggleCollapse,
   onHide,
   onOpenDesigner,
   registerFit,
+  registerFitTo,
 }: DiagramCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [, setSize] = useState({ width: 0, height: 0 });
@@ -149,6 +171,57 @@ export function DiagramCanvas({
     registerFit(fitView);
     return () => registerFit(null);
   }, [registerFit, fitView]);
+
+  /**
+   * Zoom to the union box of the given node ids (search hits). Falls back
+   * to the whole-content fit when nothing matches.
+   */
+  const fitToNodes = useCallback(
+    (ids: string[]) => {
+      const points = ids
+        .map((id) => boxes[id])
+        .filter((b): b is CardBox => b !== undefined);
+      if (points.length === 0) {
+        fitView(true);
+        return;
+      }
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const b of points) {
+        minX = Math.min(minX, b.x);
+        minY = Math.min(minY, b.y);
+        maxX = Math.max(maxX, b.x + CARD_WIDTH);
+        maxY = Math.max(maxY, b.y + b.height);
+      }
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const width = maxX - minX;
+      const height = maxY - minY;
+      const zoom = clampZoom(
+        Math.min(
+          (rect.width - FIT_PADDING * 2) / width,
+          (rect.height - FIT_PADDING * 2) / height,
+          1.5,
+        ),
+      );
+      useDiagramStore.getState().patch(tabId, {
+        viewport: {
+          zoom,
+          x: (rect.width - width * zoom) / 2 - minX * zoom,
+          y: (rect.height - height * zoom) / 2 - minY * zoom,
+        },
+      });
+    },
+    [boxes, fitView, tabId],
+  );
+
+  useEffect(() => {
+    registerFitTo(fitToNodes);
+    return () => registerFitTo(null);
+  }, [registerFitTo, fitToNodes]);
 
   // Non-passive wheel handler: plain wheel pans, Ctrl/Cmd+wheel zooms at cursor.
   useEffect(() => {
@@ -226,18 +299,24 @@ export function DiagramCanvas({
   function endPointer() {
     const drag = dragRef.current;
     if (!drag) return;
-    if (drag.kind === "pan") onSelect(null); // background click clears selection
+    if (drag.kind === "pan") {
+      // Background click clears focus first, then the selection.
+      if (focusedId !== null) onFocusChange(null);
+      onSelect(null);
+    }
     dragRef.current = null;
   }
 
-  // Esc clears the selection/hover while this canvas is mounted.
+  // Esc clears focus first, then the selection, while this canvas is mounted.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onSelect(null);
+      if (e.key !== "Escape") return;
+      if (focusedId !== null) onFocusChange(null);
+      else onSelect(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onSelect]);
+  }, [onSelect, onFocusChange, focusedId]);
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-background">
@@ -270,12 +349,20 @@ export function DiagramCanvas({
             edges={edges}
             geometries={geometries}
             highlightIds={hoveredId ? neighborIds : null}
+            matchIds={matchIds}
+            focusIds={focusIds}
             selectedId={selectedId}
             onHoverEdge={onHoverEdge}
           />
           {nodes.map((node) => {
             const box = boxes[node.id];
             if (!box) return null;
+            const hoverDimmed =
+              hoveredId !== null &&
+              hoveredId !== node.id &&
+              !(neighborIds?.has(node.id) ?? false);
+            const matchDimmed = matchIds !== null && !matchIds.has(node.id);
+            const focusDimmed = focusIds !== null && !focusIds.has(node.id);
             return (
               <g key={node.id} transform={`translate(${box.x},${box.y})`}>
                 <TableCard
@@ -283,11 +370,8 @@ export function DiagramCanvas({
                   rows={rowsByNode[node.id]}
                   collapsed={collapsedIds.has(node.id)}
                   selected={selectedId === node.id}
-                  dimmed={
-                    hoveredId !== null &&
-                    hoveredId !== node.id &&
-                    !(neighborIds?.has(node.id) ?? false)
-                  }
+                  focused={focusedId === node.id}
+                  dimmed={hoverDimmed || matchDimmed || focusDimmed}
                   onPress={(id, ev) => {
                     ev.stopPropagation();
                     beginDrag(ev, "card", id);
@@ -297,15 +381,31 @@ export function DiagramCanvas({
                   onToggleCollapse={onToggleCollapse}
                   onHide={onHide}
                   onOpenDesigner={onOpenDesigner}
+                  onIsolate={onFocusChange}
                 />
               </g>
             );
           })}
-          {hoveredEdge && geometries.get(hoveredEdge.id) && (
-            <EdgeLabelChip edge={hoveredEdge} geometry={geometries.get(hoveredEdge.id)!} />
+          {(hoveredEdge ?? selectedEdge) && geometries.get((hoveredEdge ?? selectedEdge)!.id) && (
+            <EdgeLabelChip
+              edge={(hoveredEdge ?? selectedEdge)!}
+              geometry={geometries.get((hoveredEdge ?? selectedEdge)!.id)!}
+            />
           )}
         </g>
       </svg>
+
+      {focusedId !== null && (
+        <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded-md border bg-popover/95 px-2 py-1 text-xs shadow-sm">
+          <span className="max-w-48 truncate font-medium">{focusedId}</span>
+          <span className="text-muted-foreground">
+            {t("er.focus.banner", { n: (focusIds?.size ?? 1) - 1 })}
+          </span>
+          <Button variant="ghost" size="icon-xs" onClick={() => onFocusChange(null)} aria-label={t("er.focus.exit")}>
+            <X />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
