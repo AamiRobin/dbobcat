@@ -13,6 +13,15 @@ DBobcat (**d**atabase + bobcat) is an open-source, cross-platform database GUI c
 
 Repository: <https://github.com/AamiRobin/dbobcat>
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Query editor with results grid](assets/screenshots/query-editor.png) | ![AI assistant drafting SQL](assets/screenshots/ai-assistant.png) |
+| *Query editor & virtualized result grid* | *AI assistant drafts SQL — you run it* |
+| ![AI assistant settings with MCP access](assets/screenshots/ai-settings.png) | ![Schema diagram](assets/screenshots/schema-diagram.png) |
+| *BYOK AI settings + read-only MCP agent access* | *Auto-laid-out ER diagram* |
+
 ## Features
 
 - **Session manager** with SSH tunnels, TLS, and AES-GCM-encrypted password storage (optional master password)
