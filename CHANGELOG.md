@@ -3,6 +3,35 @@
 Notable changes to DBobcat. Formats follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] — 2026-09-12
+
+UI polish release — fixes for dialog sizing, chip shapes, and wizard
+markup.
+
+### Fixed
+
+- **Dialogs ignored their width overrides** — `AlertDialogContent`
+  expressed its default width as `data-[size]` variants, whose class +
+  attribute selector outranks a plain `sm:max-w-*` override in the CSS
+  cascade, so every alert dialog that asked to be wider stayed stuck at
+  384px with its right side clipped (stepper steps and footer buttons
+  cut off). Affected the CSV/text import wizard and export dialog most
+  visibly, plus copy-table and the tree rename/definition dialogs.
+  Default widths are now plain utilities that `tailwind-merge` can
+  dedupe against caller classes; the small size keeps its narrower cap.
+- **Badges rendered as pills** — the Badge used `rounded-4xl` (26px via
+  the theme token) on chips only 16–20px tall, i.e. fully rounded ends,
+  in the message log, status bar transaction chip, data toolbar, query
+  result grid, object editor, designer, user manager, export dialog and
+  blob viewer. Now `rounded-sm`, matching the small-control corners
+  used elsewhere.
+- **Import wizard markup** — the step indicator (an `<ol>`) sat inside
+  `AlertDialogDescription`, which renders a `<p>` (invalid HTML nesting
+  that trips React warnings); it is now a sibling of a screen-reader
+  description. The paste-area placeholder showed a literal `\n` because
+  JSX string attributes don't process escapes; it now renders a real
+  line break.
+
 ## [0.1.0] — 2026-09-12
 
 First stable release — and the first one the in-app updater tracks
