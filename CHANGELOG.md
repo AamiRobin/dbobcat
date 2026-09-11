@@ -3,7 +3,10 @@
 Notable changes to DBobcat. Formats follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] — 2026-09-12
+
+First stable release — and the first one the in-app updater tracks
+(*Check for Updates…* now finds stable releases).
 
 ### Added
 
@@ -25,6 +28,43 @@ versions follow [Semantic Versioning](https://semver.org/).
   — never row data — the API key is stored in the same AES-GCM vault as
   connection passwords, and the assistant stays off until you explicitly
   configure and enable it.
+- **AI agent mode** — the assistant can now act, not just draft: it inspects
+  your schema, runs read-only queries, and proposes writes that stay one
+  confirmation away. Every statement passes an AST-based SQL risk
+  classifier (sqlparser — not regex), and a proposed write executes only
+  after you approve the exact SQL. Each approval is bound to the
+  connection, database, and statement it was granted for, and re-verified
+  — including a live "am I still on the intended database?" check —
+  immediately before execution.
+- **Advanced export options (HeidiSQL-style)** — SQL dumps gain INSERT
+  batching by row count and byte size, selectable data statements
+  (`INSERT` / `REPLACE` / `INSERT IGNORE` / `INSERT … ON DUPLICATE KEY
+  UPDATE` / `DELETE` + `INSERT`), `TRUNCATE`-before-insert, `DROP
+  DATABASE`, and AUTO_INCREMENT stripping, with an optional delay between
+  batches and full cancellation support. CSV/TSV export picks delimiter,
+  quoting, and NULL representation.
+- **Streaming XLSX export** — data grids and dumps can target Excel
+  workbooks written incrementally (constant memory), spilling into extra
+  sheets at Excel's 1,048,576-row limit.
+- **ER diagram upgrades** — crow's-foot cardinality ticks (filled =
+  mandatory child column, outline = nullable, plain line = composite
+  constraint), in-diagram table search with zoom-to-fit, and a focus mode
+  that isolates one table's relationships; selecting an edge pins a label
+  with the constraint's `ON UPDATE` / `ON DELETE` actions.
+
+### Fixed
+
+- Switching between tables no longer shows a stale or empty data grid
+  until manual refresh; left-clicking a table opens its data without
+  expanding the tree — expansion stays on the chevron.
+- Renaming, moving, or dropping a table now retargets or closes its open
+  data tabs instead of leaving stale ones behind; unsaved designer and
+  object-editor edits survive tab remounts.
+- PostgreSQL edits apply atomically: on failure everything rolls back and
+  the real server error is reported for the offending row. MySQL upserts
+  handle MySQL-only `INSERT IGNORE` semantics correctly.
+- Session manager: the Import tooltip no longer pops open when the dialog
+  opens.
 
 ## [0.1.0-alpha.3] — 2026-09-08
 
@@ -64,4 +104,5 @@ MySQL/MariaDB, PostgreSQL, and SQLite, inspired by HeidiSQL.
 - Alpha quality — expect rough edges. Nothing is sent anywhere: all data
   stays on your machine.
 
+[0.1.0]: https://github.com/AamiRobin/dbobcat/releases/tag/v0.1.0
 [0.1.0-alpha.3]: https://github.com/AamiRobin/dbobcat/releases/tag/v0.1.0-alpha.3
