@@ -283,9 +283,11 @@ function ImportWizardInner({
       <AlertDialogContent className="max-h-[88vh] overflow-auto sm:max-w-2xl">
         <AlertDialogHeader>
           <AlertDialogTitle>Import CSV / text file</AlertDialogTitle>
-          <AlertDialogDescription>
-            <Stepper steps={STEPS} active={step} className="mt-1" />
+          <AlertDialogDescription className="sr-only">
+            Five-step wizard: pick a source, tune parsing, choose a target
+            table, set the write mode, then run the import.
           </AlertDialogDescription>
+          <Stepper steps={STEPS} active={step} className="mt-1" />
         </AlertDialogHeader>
 
         {/* ---- step 0 · source ---- */}
@@ -309,7 +311,7 @@ function ImportWizardInner({
             <Textarea
               value={pastedText ?? ""}
               onChange={(e) => setPastedText(e.target.value || null)}
-              placeholder="id,name\n1,ann"
+              placeholder={"id,name\n1,ann"}
               rows={6}
               className="bg-background font-mono text-xs"
             />          </div>
