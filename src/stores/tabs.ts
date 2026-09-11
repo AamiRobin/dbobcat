@@ -124,6 +124,57 @@ export function openTab(type: TabType): Tab {
 }
 
 /**
+ * Retarget the data tab of a renamed/moved table so the open grid follows
+ * the table instead of serving ghost data under the old name. At most one
+ * data tab per connection+db+table exists (openDataTable dedupes).
+ */
+export function retargetDataTabs(
+  connId: number,
+  db: string,
+  table: string,
+  next: { db?: string; table?: string },
+): void {
+  useTabsStore.setState((s) => ({
+    tabs: s.tabs.map((t) =>
+      t.type === "data" &&
+      t.meta.connId === connId &&
+      t.meta.db === db &&
+      t.meta.table === table
+        ? {
+            ...t,
+            title: (next.table as string) ?? t.title,
+            meta: { ...t.meta, db: next.db ?? db, table: next.table ?? table },
+          }
+        : t,
+    ),
+  }));
+}
+
+/** Close the data tab(s) of a dropped table so no zombie grid lingers. */
+export function closeDataTabs(connId: number, db: string, table: string): void {
+  useTabsStore.setState((s) => {
+    const dead = new Set(
+      s.tabs
+        .filter(
+          (t) =>
+            t.type === "data" &&
+            t.meta.connId === connId &&
+            t.meta.db === db &&
+            t.meta.table === table,
+        )
+        .map((t) => t.id),
+    );
+    if (dead.size === 0) return s;
+    const tabs = s.tabs.filter((t) => !dead.has(t.id));
+    let activeId = s.activeId;
+    if (activeId !== null && dead.has(activeId)) {
+      activeId = tabs[0]?.id ?? null;
+    }
+    return { tabs, activeId };
+  });
+}
+
+/**
  * Open (or focus) the Data tab for a specific table. Reuses an existing tab
  * for the same connection + db + table, Heidi-style; re-seeding with new
  * `initialFilters` overwrites the pending seed and bumps `filterEpoch` so the

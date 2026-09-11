@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { CellAssign, RowChange, RowValue } from "@/types/ipc";
+import { useTabsStore } from "@/stores/tabs";
 
 /**
  * Per-data-tab changeset, Heidi-style: edits accumulate locally until the
@@ -79,6 +80,8 @@ interface ChangesetsState {
   setInsertValue: (tabId: string, rowId: string, column: string, value: RowValue) => void;
   toggleDeleteRow: (tabId: string, rowIndex: number) => void;
   clear: (tabId: string) => void;
+  /** Drop a tab's changeset AND undo history (tab closed — not undoable). */
+  purgeTab: (tabId: string) => void;
   /** Reverse the most recent pending change; no-op when history is empty. */
   undo: (tabId: string) => void;
 }
@@ -208,6 +211,16 @@ export const useChangesetStore = create<ChangesetsState>((set, get) => ({
         ...mutate(state, tabId, () => EMPTY_CHANGESET),
         ...record(state, tabId, { k: "clear", snapshot }),
       };
+    }),
+
+  purgeTab: (tabId) =>
+    set((state) => {
+      if (!(tabId in state.byTab) && !(tabId in state.history)) return state;
+      const byTab = { ...state.byTab };
+      const history = { ...state.history };
+      delete byTab[tabId];
+      delete history[tabId];
+      return { byTab, history };
     }),
 
   undo: (tabId) => {
@@ -409,3 +422,14 @@ function keyPredicate(
       : [];
   });
 }
+
+// Keep the store tidy: drop changesets and undo history once their tab is
+// closed (mirrors stores/query-editor.ts). Pending edits die with the tab —
+// that is intentional: a closed tab has no grid to post them from.
+useTabsStore.subscribe((next, prev) => {
+  if (next.tabs.length >= prev.tabs.length) return;
+  const ids = new Set(next.tabs.map((t) => t.id));
+  for (const id of Object.keys(useChangesetStore.getState().byTab)) {
+    if (!ids.has(id)) useChangesetStore.getState().purgeTab(id);
+  }
+});

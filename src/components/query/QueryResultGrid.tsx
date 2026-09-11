@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { RedoDot, Undo2 } from "lucide-react";
 
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import {
   applyDataChanges,
+  dataKeys,
   fetchColumns,
   primaryKeyColumns,
 } from "@/lib/db-queries";
@@ -64,6 +65,7 @@ export function QueryResultGrid({
   const [focusedCell, setFocusedCell] = useState<FocusedCell | null>(null);
   const [editingCell, setEditingCell] = useState<FocusedCell | null>(null);
   const [blobValue, setBlobValue] = useState<Extract<RowValue, { t: "bytes" }> | null>(null);
+  const queryClient = useQueryClient();
 
   // -- updatable-results detection ------------------------------------------
   const detected = useMemo(
@@ -208,6 +210,13 @@ export function QueryResultGrid({
         notify.warning(`${r.applied} applied, ${r.failed} failed — failed edits kept.`);
       } else {
         useChangesetStore.getState().clear(changesetKey);
+        // An open data tab of the same table must not keep showing
+        // pre-edit rows.
+        if (connId !== null && effectiveDb !== null && detected) {
+          void queryClient.invalidateQueries({
+            queryKey: dataKeys.table(connId, effectiveDb, detected.table),
+          });
+        }
         notify.success(
           t("query.editable.posted", {
             count: r.applied,

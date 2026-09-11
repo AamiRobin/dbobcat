@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { TREE_STALE_TIME, dbKeys, fetchDatabases } from "@/lib/db-queries";
+import { diaKeys } from "@/lib/diagram-queries";
 import {
   bulkAlterTables,
   dropObjects,
@@ -26,12 +27,14 @@ import {
   runMaintenance,
   truncateTables,
 } from "@/lib/object-queries";
+import { invalidateTableArtifacts } from "@/lib/table-invalidate";
 import { CHARSETS, ENGINES } from "@/components/designer/column-utils";
 import type { MaintenanceOp, MaintenanceResult, ObjectOpResult } from "@/types/ipc";
 
 import { useConnectionStore } from "@/stores/connection";
 import { notify } from "@/lib/toast";
 import { log } from "@/stores/log";
+import { retargetDataTabs } from "@/stores/tabs";
 
 import { CopyTableDialog } from "./CopyTableDialog";
 import { useTreeDialogsStore } from "./tree-dialogs-store";
@@ -386,9 +389,14 @@ function PromptDialog() {
       if (prompt.kind === "rename") {
         await renameTable(connId, prompt.db, prompt.table, name);
         notify.success(`Table renamed to \`${name}\`.`);
+        // The open grid follows the table; caches under the old name go stale.
+        retargetDataTabs(connId, prompt.db, prompt.table, { table: name });
+        invalidateTableArtifacts(queryClient, connId, prompt.db, prompt.table);
       } else {
         await emptyCloneTable(connId, prompt.db, prompt.table, prompt.db, name);
         notify.success(`Structure of \`${prompt.table}\` copied to \`${name}\`.`);
+        // Diagram/AI schema scans must learn about the new table.
+        void queryClient.invalidateQueries({ queryKey: diaKeys.all(connId) });
       }
       void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, prompt.db) });
       closeAll();
@@ -500,6 +508,16 @@ function BulkAlterDialog() {
         }
         for (const r of res) {
           if (!r.ok) log("error", `Bulk alter \`${r.name}\` failed: ${r.error}`);
+        }
+        // Stale-proof every altered table: open grids, DDL, FK caches —
+        // and follow moved tables with their open data tabs.
+        for (const r of res) {
+          if (!r.ok) continue;
+          invalidateTableArtifacts(queryClient, connId, request.db, r.name);
+          if (newDb) {
+            invalidateTableArtifacts(queryClient, connId, newDb, r.name);
+            retargetDataTabs(connId, request.db, r.name, { db: newDb });
+          }
         }
         void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, request.db) });
         if (newDb) {

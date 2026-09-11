@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Braces, Clock, Eye, Play, RefreshCw, Sigma, X, Zap } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { SqlCodeEditor } from "@/components/common/SqlCodeEditor";
 import { templateFor } from "@/components/objects/templates";
@@ -21,6 +21,7 @@ import {
 import { log } from "@/stores/log";
 import { notify } from "@/lib/toast";
 import { useConnectionStore } from "@/stores/connection";
+import { useObjectEditorDraftsStore } from "@/stores/object-editor-drafts";
 import { useTabsStore, type Tab } from "@/stores/tabs";
 import { useUiStore } from "@/stores/ui";
 
@@ -131,17 +132,34 @@ function ObjectEditorInner({
     retry: false,
   });
 
-  const [sqlText, setSqlText] = useState<string>(() =>
-    createMode
-      ? templateFor({ db, kind, routineKind })
-      : "",
+  // The SQL buffer lives in a store keyed by tab id so tab switches (which
+  // remount this component) never lose typed edits; fall back to the
+  // template / fetched definition until the first edit or adoption.
+  const stored = useObjectEditorDraftsStore((s) => s.byTab[tabId]);
+  const fallbackSql = useMemo(
+    () => (createMode ? templateFor({ db, kind, routineKind }) : ""),
+    [createMode, db, kind, routineKind],
   );
-  const [loadedAt, setLoadedAt] = useState<number>(0);
+  const sqlText = stored?.sql ?? fallbackSql;
+
+  const setSqlText = useCallback(
+    (value: React.SetStateAction<string>) => {
+      const store = useObjectEditorDraftsStore.getState();
+      const prev = store.byTab[tabId]?.sql ?? fallbackSql;
+      const next =
+        typeof value === "function" ? (value as (p: string) => string)(prev) : value;
+      store.setSql(tabId, next);
+    },
+    [tabId, fallbackSql],
+  );
+
   const definerNoteLogged = useRef(false);
 
+  // Adopt fetched definitions exactly once per load — but only when they are
+  // NEWER than the snapshot the stored buffer is based on, so a remount that
+  // restores the same cached DDL cannot clobber typed edits.
   useEffect(() => {
-    if (createMode || !ddlQuery.data || ddlQuery.dataUpdatedAt === loadedAt) return;
-    setLoadedAt(ddlQuery.dataUpdatedAt);
+    if (createMode || !ddlQuery.data || ddlQuery.dataUpdatedAt === stored?.loadedAt) return;
     let text = ddlQuery.data.createSql;
     const stripped = stripDefiner(text);
     if (stripped !== text && !definerNoteLogged.current) {
@@ -149,8 +167,10 @@ function ObjectEditorInner({
       log("info", `DEFINER clause(s) removed from ${kind} \`${name}\` — apply will run as the current user.`);
     }
     text = stripped;
-    setSqlText(`${text.trimEnd()};\n`);
-  }, [createMode, ddlQuery.data, ddlQuery.dataUpdatedAt, loadedAt, kind, name]);
+    useObjectEditorDraftsStore
+      .getState()
+      .adopt(tabId, `${text.trimEnd()};\n`, ddlQuery.dataUpdatedAt);
+  }, [createMode, ddlQuery.data, ddlQuery.dataUpdatedAt, stored?.loadedAt, kind, name, tabId]);
 
   // -- apply ------------------------------------------------------------------
   const [applying, setApplying] = useState(false);

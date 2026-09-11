@@ -1842,24 +1842,61 @@ impl DbConnection for PgConnection {
                 }
             }
         } else {
-            // One atomic batch; statement failures roll back only themselves
-            // and are collected like any other row error (PG continues the tx).
+            // One atomic batch. PostgreSQL aborts the transaction on the
+            // first statement error (25P02) — later statements and commit
+            // would all fail — so stop at the first failure, roll back, and
+            // report EVERY change as failed while keeping the triggering
+            // row's real error. The grid then leaves all edits staged.
             let tx = self.client.transaction().await?;
+            let mut trigger: Option<RowError> = None;
             for (index, sql, params) in &built {
                 let refs: Vec<&(dyn ToSql + Sync)> =
                     params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
                 match tx.execute(sql.as_str(), &refs).await {
                     Ok(_) => applied += 1,
                     Err(err) => {
-                        failed += 1;
-                        errors.push(RowError {
+                        trigger = Some(RowError {
                             index: *index,
                             message: err.to_string(),
                         });
+                        break;
                     }
                 }
             }
-            tx.commit().await?;
+            match trigger {
+                None => {
+                    // A commit failure (e.g. a deferred constraint) also
+                    // rolls the whole batch back.
+                    if let Err(err) = tx.commit().await {
+                        trigger = Some(RowError {
+                            index: 0,
+                            message: format!("commit failed — batch rolled back: {err}"),
+                        });
+                    }
+                }
+                Some(_) => {
+                    let _ = tx.rollback().await;
+                }
+            }
+            if let Some(t) = trigger {
+                applied = 0;
+                failed = req.changes.len() as u32;
+                let build_errors: std::collections::HashMap<usize, String> =
+                    errors.drain(..).map(|e| (e.index, e.message)).collect();
+                errors = (0..req.changes.len())
+                    .map(|i| RowError {
+                        index: i,
+                        message: build_errors.get(&i).cloned().unwrap_or_else(|| {
+                            if t.index == i {
+                                t.message.clone()
+                            } else {
+                                "rolled back — the batch aborted on another row's error"
+                                    .to_string()
+                            }
+                        }),
+                    })
+                    .collect();
+            }
         }
 
         Ok(ApplyChangesResult {

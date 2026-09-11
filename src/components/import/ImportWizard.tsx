@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -41,6 +41,7 @@ import {
   fetchDatabases,
   fetchTables,
 } from "@/lib/db-queries";
+import { invalidateTableArtifacts } from "@/lib/table-invalidate";
 import {
   autoMapColumns,
   guessColumnTypes,
@@ -123,6 +124,7 @@ function ImportWizardInner({
   onClose: () => void;
 }) {
   const connId = useConnectionStore((s) => s.connId) ?? request.connId;
+  const queryClient = useQueryClient();
 
   // -- step state -------------------------------------------------------------
   const [step, setStep] = useState(0);
@@ -243,6 +245,15 @@ function ImportWizardInner({
       setResult(res);
       notify.success("toast.import.finished", { inserted: res.inserted.toLocaleString() });
       log("success", `Import finished — ${res.inserted} row(s), ${res.errors.length} error(s), ${res.elapsedMs}ms.`);
+      // The tree must show a newly created table, and any open grid of the
+      // target must pick up the imported rows.
+      void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, targetDb) });
+      invalidateTableArtifacts(
+        queryClient,
+        connId,
+        targetDb,
+        createNew ? newTableName.trim() : targetTable,
+      );
     },
     onError: (err) => {
       notify.error(`Import failed: ${err instanceof Error ? err.message : String(err)}`);

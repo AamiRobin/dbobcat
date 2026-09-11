@@ -64,6 +64,8 @@ interface PersistedDiagram {
   hidden?: string[];
   keysOnly?: boolean;
   collapsed?: Record<string, true>;
+  /** Store `layoutVersion` the snapshot was written from (ordering guard). */
+  layoutVersion?: number;
 }
 
 export function DiagramView({ tab }: { tab: Tab }) {
@@ -118,11 +120,22 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
         if (cancelled) return;
         if (value) {
           persistedKeysOnly.current = value.keysOnly;
-          patch(tabId, {
-            ...(value.positions ? { positions: value.positions } : {}),
-            ...(value.hidden ? { hidden: value.hidden } : {}),
-            ...(value.collapsed ? { collapsed: value.collapsed } : {}),
-          });
+          // Ordering guard: a persisted snapshot older than the live store
+          // (edits made within the persist debounce before switching away)
+          // must not overwrite fresher in-memory positions. Version-less
+          // legacy blobs only hydrate tabs with no state yet.
+          const current = useDiagramStore.getState().byTab[tabId];
+          const isFresh =
+            typeof value.layoutVersion === "number"
+              ? value.layoutVersion > (current?.layoutVersion ?? 0)
+              : current === undefined;
+          if (isFresh) {
+            patch(tabId, {
+              ...(value.positions ? { positions: value.positions } : {}),
+              ...(value.hidden ? { hidden: value.hidden } : {}),
+              ...(value.collapsed ? { collapsed: value.collapsed } : {}),
+            });
+          }
         }
       })
       .catch((err) => console.warn("could not load diagram layout:", err))
@@ -157,6 +170,7 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
         hidden: dia.hidden,
         keysOnly: dia.keysOnly,
         collapsed: dia.collapsed,
+        layoutVersion: dia.layoutVersion,
       };
       void ipc("app_settings_set", {
         key: `diagram.${sessionId}.${db}`,

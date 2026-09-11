@@ -228,7 +228,15 @@ function DataViewInner({
   }, [query.data, query.dataUpdatedAt]);
 
   // Identity changes wipe accumulated pages immediately (avoid mixed schemas).
+  // Mount is skipped via prev-value comparison: db/table are fixed for a
+  // mounted instance (openDataTable dedupes per conn+db+table), so a mount
+  // run here could only clobber the cached-page restore above — leaving a
+  // fresh-cached revisit (< staleTime, no refetch) with an empty grid.
+  const identityRef = useRef({ db, table });
   useEffect(() => {
+    const prev = identityRef.current;
+    identityRef.current = { db, table };
+    if (prev.db === db && prev.table === table) return;
     setPages([]);
     setOffset(0);
     setSelectedIds(new Set());
@@ -236,7 +244,20 @@ function DataViewInner({
     setEditingCell(null);
   }, [db, table]);
 
+  // View-parameter changes wipe accumulated pages for the same reason — and
+  // must skip the initial mount the same way, or they'd erase the restore.
+  const viewParamsRef = useRef({ pageSize, orderBy, filters, nonce });
   useEffect(() => {
+    const prev = viewParamsRef.current;
+    viewParamsRef.current = { pageSize, orderBy, filters, nonce };
+    if (
+      prev.pageSize === pageSize &&
+      prev.nonce === nonce &&
+      JSON.stringify(prev.orderBy) === JSON.stringify(orderBy) &&
+      JSON.stringify(prev.filters) === JSON.stringify(filters)
+    ) {
+      return;
+    }
     setPages([]);
     setOffset(0);
     setSelectedIds(new Set());

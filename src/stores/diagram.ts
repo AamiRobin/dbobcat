@@ -36,6 +36,13 @@ export interface DiagramTabState {
   keysOnly: boolean;
   /** Bump to force a fresh dagre run (Relayout). */
   layoutNonce: number;
+  /**
+   * Monotonic-ish stamp (Date.now() at the last patch) used to order the
+   * live layout against the persisted snapshot: hydration must not apply a
+   * persisted layout older than unsaved in-memory edits (the 500ms persist
+   * debounce may not have flushed before a tab switch).
+   */
+  layoutVersion: number;
 }
 
 export const EMPTY_DIAGRAM_TAB: DiagramTabState = {
@@ -47,6 +54,7 @@ export const EMPTY_DIAGRAM_TAB: DiagramTabState = {
   positions: {},
   keysOnly: false,
   layoutNonce: 0,
+  layoutVersion: 0,
 };
 
 interface DiagramState {
@@ -66,6 +74,7 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
         [tabId]: {
           ...(state.byTab[tabId] ?? EMPTY_DIAGRAM_TAB),
           ...partial,
+          layoutVersion: Date.now(),
         },
       },
     })),

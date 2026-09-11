@@ -448,7 +448,13 @@ pub fn build_multirow_insert(
             return sql;
         }
     }
-    sql.push_str(&dialect.upsert_suffix(upsert_columns, ignore, |c| dialect.quote_ident(c)));
+    sql.push_str(&dialect.upsert_suffix(
+        upsert_columns,
+        ignore,
+        // Real column for the MySQL duplicate-only-ignore self-assignment.
+        columns.first().map(String::as_str).unwrap_or_default(),
+        |c| dialect.quote_ident(c),
+    ));
     sql
 }
 
@@ -644,7 +650,10 @@ mod tests {
         );
 
         let ignored = build_multirow_insert(SqlDialect::Mysql, "`d`.`t`", &["a".into()], 1, true, None);
-        assert!(ignored.starts_with("INSERT IGNORE INTO `d`.`t` (`a`) VALUES (?)"));
+        assert_eq!(
+            ignored,
+            "INSERT IGNORE INTO `d`.`t` (`a`) VALUES (?) ON DUPLICATE KEY UPDATE `a` = `a`"
+        );
 
         let upsert = build_multirow_insert(
             SqlDialect::Mysql,

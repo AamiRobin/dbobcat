@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import { ipc, onBackendEvent } from "@/lib/ipc";
 import { log } from "@/stores/log";
+import { useTabsStore } from "@/stores/tabs";
 import { shouldAskOnDisconnect, useTransactionStore } from "@/stores/transaction";
 import type { ConnInfo, ConnStatusEvent, DbType, ServerInfo } from "@/types/ipc";
 
@@ -90,6 +91,18 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       );
       // Fresh connection → fresh ledger (backend starts idle too).
       useTransactionStore.getState().clear();
+      // Close tabs left over from a previous session: they carry the old
+      // connId and would only error against the new backend. Launch-restored
+      // query tabs carry no connId and follow the new connection instead.
+      const staleTabs = useTabsStore
+        .getState()
+        .tabs.filter(
+          (t) => typeof t.meta.connId === "number" && t.meta.connId !== info.connId,
+        );
+      for (const t of staleTabs) useTabsStore.getState().closeTab(t.id);
+      if (staleTabs.length > 0) {
+        log("info", `Closed ${staleTabs.length} tab(s) from the previous session.`);
+      }
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

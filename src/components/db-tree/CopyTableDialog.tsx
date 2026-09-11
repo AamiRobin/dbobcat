@@ -18,6 +18,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { t } from "@/lib/i18n";
+import { diaKeys } from "@/lib/diagram-queries";
 import {
   TREE_STALE_TIME,
   dbKeys,
@@ -111,6 +112,8 @@ function CopyTableDialogInner({
       void queryClient.invalidateQueries({
         queryKey: dbKeys.tables(connId, targetDb),
       });
+      // Diagram/AI schema scans must learn about the new table.
+      void queryClient.invalidateQueries({ queryKey: diaKeys.all(connId) });
       notify.success(
         t("tree.copyTable.done", {
           count: inserted,

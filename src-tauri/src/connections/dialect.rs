@@ -69,10 +69,13 @@ impl SqlDialect {
 
     /// Tail turning an INSERT into an upsert over `conflict_cols`
     /// (`None`/empty → plain INSERT or an ignore-tail when `ignore`).
+    /// `fallback_col` (any real column of the insert) is only used by the
+    /// MySQL duplicate-only-ignore tail.
     pub fn upsert_suffix(
         self,
         conflict_cols: Option<&[String]>,
         ignore: bool,
+        fallback_col: &str,
         quote: impl Fn(&str) -> String,
     ) -> String {
         match self {
@@ -85,7 +88,14 @@ impl SqlDialect {
                         .join(", ");
                     format!(" ON DUPLICATE KEY UPDATE {sets}")
                 }
-                None if ignore => " ON DUPLICATE KEY UPDATE `<no-op>` = `<no-op>`".to_string(),
+                // Duplicate-only ignore: self-assigning a real column leaves
+                // the existing row untouched while strict-mode errors (e.g.
+                // truncation) still surface — unlike INSERT IGNORE, which
+                // downgrades them to warnings.
+                None if ignore => {
+                    let c = quote(fallback_col);
+                    format!(" ON DUPLICATE KEY UPDATE {c} = {c}")
+                }
                 None => String::new(),
             },
             SqlDialect::Sqlite => match conflict_cols.filter(|c| !c.is_empty()) {
@@ -243,21 +253,29 @@ mod tests {
         let q = |s: &str| format!("`{s}`");
 
         assert_eq!(
-            SqlDialect::Mysql.upsert_suffix(Some(&cols), false, q),
+            SqlDialect::Mysql.upsert_suffix(Some(&cols), false, "v", q),
             " ON DUPLICATE KEY UPDATE `v` = VALUES(`v`)"
         );
         assert_eq!(
-            SqlDialect::Postgres.upsert_suffix(Some(&cols), false, q),
+            SqlDialect::Postgres.upsert_suffix(Some(&cols), false, "v", q),
             " ON CONFLICT (`v`) DO UPDATE SET `v` = excluded.`v`"
         );
         assert_eq!(
-            SqlDialect::Sqlite.upsert_suffix(Some(&cols), false, q),
+            SqlDialect::Sqlite.upsert_suffix(Some(&cols), false, "v", q),
             " ON CONFLICT (`v`) DO UPDATE SET `v` = excluded.`v`"
         );
-        // Ignore-only inserts: PG has a conflict tail, SQLite uses the verb.
-        assert_eq!(SqlDialect::Postgres.upsert_suffix(None, true, q), " ON CONFLICT DO NOTHING");
-        assert_eq!(SqlDialect::Sqlite.upsert_suffix(None, true, q), "");
-        assert_eq!(SqlDialect::Mysql.upsert_suffix(None, false, q), "");
+        // Ignore-only inserts: PG has a conflict tail, SQLite uses the verb,
+        // MySQL self-assigns a real column (duplicate-only ignore).
+        assert_eq!(
+            SqlDialect::Postgres.upsert_suffix(None, true, "v", q),
+            " ON CONFLICT DO NOTHING"
+        );
+        assert_eq!(SqlDialect::Sqlite.upsert_suffix(None, true, "v", q), "");
+        assert_eq!(SqlDialect::Mysql.upsert_suffix(None, false, "v", q), "");
+        assert_eq!(
+            SqlDialect::Mysql.upsert_suffix(None, true, "v", q),
+            " ON DUPLICATE KEY UPDATE `v` = `v`"
+        );
     }
 
     #[test]

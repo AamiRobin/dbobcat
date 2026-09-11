@@ -62,12 +62,15 @@ import {
   truncateTables,
 } from "@/lib/object-queries";
 import { compileTreeFilter, type TreeMatcher } from "@/lib/tree-filter";
+import { invalidateTableArtifacts } from "@/lib/table-invalidate";
 import { useConnectionStore } from "@/stores/connection";
 import {
+  closeDataTabs,
   openDataTable,
   openDesignerTab,
   openDiagramTab,
   openObjectEditorTab,
+  retargetDataTabs,
 } from "@/stores/tabs";
 import type {
   ColumnMeta,
@@ -351,6 +354,9 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
     try {
       await renameTable(connId, database, table.name, table.name, pendingMoveDb);
       notify.success(`Table \`${table.name}\` moved to ${pendingMoveDb}.`);
+      // The open grid follows the table; caches under the old db go stale.
+      retargetDataTabs(connId, database, table.name, { db: pendingMoveDb });
+      invalidateTableArtifacts(queryClient, connId, database, table.name);
       void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, database) });
       void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, pendingMoveDb) });
     } catch (err) {
@@ -368,11 +374,15 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
       if (confirming === "drop") {
         await dropObjects(connId, [{ db: database, kind: "table", name: table.name }]);
         notify.success(`Table \`${table.name}\` dropped.`);
+        // No zombie grid for a dropped table.
+        closeDataTabs(connId, database, table.name);
       } else {
         await truncateTables(connId, database, [table.name]);
         notify.success(`Table \`${table.name}\` truncated.`);
       }
       void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, database) });
+      // Open grids must not keep showing rows that no longer exist.
+      invalidateTableArtifacts(queryClient, connId, database, table.name);
     } catch (err) {
       notify.error(`${confirming === "drop" ? "Drop" : "Truncate"} failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -405,13 +415,10 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
     <li>
       <TreeRow
         open={open}
-        // Heidi-style: a single click on the row opens the table's data grid
-        // (repeated clicks refocus the existing tab) and expands the column
-        // list; the chevron alone expands/collapses without opening data.
-        onToggle={() => {
-          openData();
-          setOpen(true);
-        }}
+        // A single click on the row only opens the table's data grid
+        // (repeated clicks refocus the existing tab); the chevron alone
+        // expands/collapses the column list.
+        onToggle={openData}
         onChevronToggle={() => setOpen(!open)}
         // Redundant with the click above, but harmless (openDataTable dedupes
         // tabs) and keeps dblclick paths working for assistive tech.
@@ -1338,6 +1345,9 @@ function DatabaseNode({
     try {
       await renameTable(connId, pendingMove.db, pendingMove.table, pendingMove.table, name);
       notify.success(`Table \`${pendingMove.table}\` moved to ${name}.`);
+      // The open grid follows the table; caches under the old db go stale.
+      retargetDataTabs(connId, pendingMove.db, pendingMove.table, { db: name });
+      invalidateTableArtifacts(queryClient, connId, pendingMove.db, pendingMove.table);
       void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, pendingMove.db) });
       void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, name) });
     } catch (err) {

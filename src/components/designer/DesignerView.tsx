@@ -8,7 +8,7 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AlterPreviewDialog } from "@/components/designer/AlterPreviewDialog";
 import {
@@ -36,9 +36,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { dbKeys, TREE_STALE_TIME } from "@/lib/db-queries";
 import { diaKeys } from "@/lib/diagram-queries";
 import { alterTable, createTable, fetchTableDdl, objKeys } from "@/lib/object-queries";
+import { invalidateTableArtifacts } from "@/lib/table-invalidate";
 import { notify } from "@/lib/toast";
 import { log } from "@/stores/log";
 import { useConnectionStore } from "@/stores/connection";
+import { useDesignerDraftsStore } from "@/stores/designer-drafts";
 import type { SqlDialect } from "@/types/ipc";
 import { useTabsStore, type Tab } from "@/stores/tabs";
 import { useUiStore } from "@/stores/ui";
@@ -99,18 +101,43 @@ function DesignerInner({
     retry: false,
   });
 
-  const [draft, setDraft] = useState<TableDdlType>(() =>
-    createMode ? blankDraft(db, "") : (ddlQuery.data ?? blankDraft(db, table ?? "")),
+  // The draft lives in a store keyed by tab id so tab switches (which
+  // remount this component) never lose unsaved edits; fall back to the
+  // fetched snapshot / blank draft until the first edit or adoption.
+  const stored = useDesignerDraftsStore((s) => s.byTab[tabId]);
+  const fallbackDraft = useMemo(
+    () =>
+      createMode
+        ? blankDraft(db, "")
+        : (ddlQuery.data ?? blankDraft(db, table ?? "")),
+    [createMode, db, table, ddlQuery.data],
   );
-  const [loadedAt, setLoadedAt] = useState<number>(0);
+  const draft = stored?.draft ?? fallbackDraft;
 
-  // Adopt fetched snapshots exactly once per load.
+  // Write-through setter with the same SetStateAction shape the tabs use.
+  const setDraft = useCallback(
+    (value: React.SetStateAction<TableDdlType>) => {
+      const store = useDesignerDraftsStore.getState();
+      const prev = store.byTab[tabId]?.draft ?? fallbackDraft;
+      const next =
+        typeof value === "function"
+          ? (value as (p: TableDdlType) => TableDdlType)(prev)
+          : value;
+      store.setDraft(tabId, next);
+    },
+    [tabId, fallbackDraft],
+  );
+
+  // Adopt fetched snapshots exactly once per load — but only when they are
+  // NEWER than the snapshot the stored draft is based on, so a remount that
+  // restores the same cached DDL cannot clobber unsaved edits.
   useEffect(() => {
-    if (!createMode && ddlQuery.data && ddlQuery.dataUpdatedAt !== loadedAt) {
-      setDraft(structuredClone(ddlQuery.data));
-      setLoadedAt(ddlQuery.dataUpdatedAt);
+    if (!createMode && ddlQuery.data && ddlQuery.dataUpdatedAt !== stored?.loadedAt) {
+      useDesignerDraftsStore
+        .getState()
+        .adopt(tabId, structuredClone(ddlQuery.data), ddlQuery.dataUpdatedAt);
     }
-  }, [createMode, ddlQuery.data, ddlQuery.dataUpdatedAt, loadedAt]);
+  }, [createMode, ddlQuery.data, ddlQuery.dataUpdatedAt, stored?.loadedAt, tabId]);
 
   // No-PK warning (P2 pattern reuse).
   useEffect(() => {
@@ -179,6 +206,8 @@ function DesignerInner({
       }
       void queryClient.invalidateQueries({ queryKey: dbKeys.tables(connId, db) });
       void queryClient.invalidateQueries({ queryKey: objKeys.ddl(connId, db, table!) });
+      // Open data grids of this table must pick up the new schema/rows.
+      invalidateTableArtifacts(queryClient, connId, db, table!);
       // Diagram caches (columns + whole-schema FKs) must follow.
       void queryClient.invalidateQueries({ queryKey: diaKeys.all(connId) });
       await ddlQuery.refetch();
