@@ -651,9 +651,9 @@ function ExportDialogInner({
                     />
                   </div>
                   {dump.extendedInserts && (
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground">
-                      <label className="flex items-center gap-1.5">
-                        Max INSERT size
+                    <div className="flex flex-nowrap items-center gap-x-4 rounded bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground">
+                      <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+                        Max INSERT size (KB)
                         <Input
                           type="number"
                           min={1}
@@ -664,11 +664,10 @@ function ExportDialogInner({
                               maxInsertSizeKb: Math.max(0, Math.floor(Number(e.target.value) || 0)),
                             })
                           }
-                          className="h-6 w-20 px-1.5 font-mono text-xs"
+                          className="h-6 w-16 px-1.5 font-mono text-xs"
                         />
-                        KB
                       </label>
-                      <label className="flex items-center gap-1.5">
+                      <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
                         Rows per statement
                         <Input
                           type="number"
@@ -680,11 +679,11 @@ function ExportDialogInner({
                               batchRows: Math.max(0, Math.floor(Number(e.target.value) || 0)),
                             })
                           }
-                          className="h-6 w-20 px-1.5 font-mono text-xs"
+                          className="h-6 w-16 px-1.5 font-mono text-xs"
                         />
                       </label>
-                      <label className="flex items-center gap-1.5">
-                        Delay between statements
+                      <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+                        Delay (ms)
                         <Input
                           type="number"
                           min={0}
@@ -695,9 +694,8 @@ function ExportDialogInner({
                               delayMs: Math.max(0, Math.floor(Number(e.target.value) || 0)),
                             })
                           }
-                          className="h-6 w-20 px-1.5 font-mono text-xs"
+                          className="h-6 w-16 px-1.5 font-mono text-xs"
                         />
-                        ms
                       </label>
                     </div>
                   )}
