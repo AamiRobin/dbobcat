@@ -32,7 +32,6 @@ import { usePaletteStore } from "@/stores/palette";
 import { useTabsStore } from "@/stores/tabs";
 import { useUiStore } from "@/stores/ui";
 import { shouldAskOnQuit, useTransactionStore } from "@/stores/transaction";
-import { notify } from "@/lib/toast";
 
 // ---------------------------------------------------------------------------
 // Context + types
@@ -331,36 +330,17 @@ export async function refreshTree(): Promise<void> {
 }
 
 /**
- * Check the update server. The updater plugin is only configured in signed
- * release builds (see `tauri.updater.conf.json`); locally this surfaces a
- * friendly note instead of an error.
+ * Check the update server (Help → Check for Updates…). Delegates to the
+ * updater store: a manual check is not silent — "up to date" gets a toast —
+ * and a found update downloads immediately, matching the old behavior. The
+ * status bar chip mirrors the same progress either way.
  */
 export async function checkForUpdates(): Promise<void> {
-  try {
-    const { check } = await import("@tauri-apps/plugin-updater");
-    const update = await check();
-    if (!update) {
-      notify.info("You are up to date.");
-      return;
-    }
-    notify.info(`Downloading update ${update.version}…`);
-    await update.downloadAndInstall();
-    notify.success(`Update ${update.version} installed — restart to apply.`);
-    const { confirm } = await import("@tauri-apps/plugin-dialog");
-    const restart = await confirm("Update installed. Restart now?", {
-      title: "Restart DBobcat",
-      kind: "info",
-    });
-    if (restart) {
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      await relaunch();
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log(
-      "warn",
-      `Auto-update unavailable (${message}). Release builds bundle the updater endpoint.`,
-    );
+  const { useUpdaterStore } = await import("@/stores/updater");
+  const updater = useUpdaterStore.getState();
+  await updater.check({ silent: false });
+  if (useUpdaterStore.getState().status === "available") {
+    await updater.install();
   }
 }
 

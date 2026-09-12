@@ -163,9 +163,17 @@ export default function App() {
       const action = MENU_ACTIONS[id];
       if (action) void dispatchAction(action);
     });
+    // Update check shortly after launch (silent: only speaks up when an
+    // update exists, surfacing the install button in the status bar).
+    const updateCheckTimer = setTimeout(() => {
+      void import("@/stores/updater").then((m) =>
+        m.useUpdaterStore.getState().check({ silent: true }),
+      );
+    }, 5000);
     return () => {
       uninstallPersist();
       stopLaunchIntents();
+      clearTimeout(updateCheckTimer);
       void stopConnStatus.then((fn) => fn());
       void stopTxStatus.then((fn) => fn());
       unlistenClose?.();

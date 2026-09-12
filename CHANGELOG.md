@@ -3,6 +3,27 @@
 Notable changes to DBobcat. Formats follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] — 2026-09-12
+
+Update experience release — the app now checks for updates on its own
+and shows a visible install button.
+
+### Added
+
+- **Automatic update check** — five seconds after launch the app quietly
+  queries the release feed; when a newer version exists, an install
+  button appears in the status bar and a toast announces it. Checking
+  stays silent when you are already current. Downloads report progress
+  in the same spot and end with a restart prompt. (Previously the check
+  only ran from Help → Check for Updates….)
+
+### Fixed
+
+- **Windows/Linux had no reachable update check** — the app removes the
+  native title bar on those platforms, which also removes the menu bar
+  housing "Check for Updates…". The new status bar button makes the
+  update path platform-independent; the menu item remains for macOS.
+
 ## [0.1.1] — 2026-09-12
 
 UI polish release — fixes for dialog sizing, chip shapes, and wizard

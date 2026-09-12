@@ -1,10 +1,12 @@
-import { Circle } from "lucide-react";
+import { Circle, Download } from "lucide-react";
 
 import { Separator } from "@/components/ui/separator";
 import { TransactionChip } from "@/components/layout/TransactionChip";
+import { Spinner } from "@/components/ui/spinner";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useConnectionStore, type LinkState } from "@/stores/connection";
+import { useUpdaterStore } from "@/stores/updater";
 import { useUiStore } from "@/stores/ui";
 
 /** Link-health dot colors: green ok, amber pulsing reconnecting, red lost. */
@@ -26,6 +28,10 @@ export function StatusBar() {
   const session = useConnectionStore((s) => s.session);
   const serverInfo = useConnectionStore((s) => s.serverInfo);
   const dataStats = useUiStore((s) => s.dataStats);
+  const updateStatus = useUpdaterStore((s) => s.status);
+  const updateVersion = useUpdaterStore((s) => s.version);
+  const updateProgress = useUpdaterStore((s) => s.progress);
+  const installUpdate = useUpdaterStore((s) => s.install);
 
   const connected = status === "connected" && session !== null;
   const pending = status === "connecting" || status === "error";
@@ -73,6 +79,34 @@ export function StatusBar() {
       <TransactionChip />
 
       <span className="ml-auto flex items-center gap-2 tabular-nums">
+        {updateStatus !== "idle" && (
+          <>
+            {updateStatus === "available" && (
+              <button
+                type="button"
+                onClick={() => void installUpdate()}
+                title={`Download and install update ${updateVersion}`}
+                className="flex items-center gap-1 rounded-sm px-1 font-medium text-success hover:bg-muted"
+              >
+                <Download className="size-3" />
+                Update v{updateVersion} — install
+              </button>
+            )}
+            {updateStatus === "downloading" && (
+              <span className="flex items-center gap-1" aria-live="polite">
+                <Spinner className="size-3" />
+                Downloading update{updateProgress != null ? ` — ${updateProgress}%` : "…"}
+              </span>
+            )}
+            {updateStatus === "ready" && (
+              <span className="flex items-center gap-1 font-medium text-success">
+                <Download className="size-3" />
+                Update installed — restart to apply
+              </span>
+            )}
+            <Separator orientation="vertical" className="h-3!" />
+          </>
+        )}
         {connected && serverInfo && (
           <>
             <span>
