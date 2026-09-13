@@ -36,3 +36,6 @@ Thumbs.db
 
 # Dev-tool session data (screenshots/notes)
 .openchamber/
+
+# Agent tooling session data
+.zcode/

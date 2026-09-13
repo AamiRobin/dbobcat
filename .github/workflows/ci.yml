@@ -1,19 +1,33 @@
 name: CI
 
+# Cheap gates on every push/PR: typecheck, tests, clippy. Heavy multi-platform
+# builds only run on release tags (release.yml) and the scheduled nightly
+# (nightly.yml) — never per commit.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
+      - "docs/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
+      - "docs/**"
 
+# A newer commit on the same branch always supersedes the running one —
+# finishing a stale run just burns minutes.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   frontend:
     name: Frontend (bun)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -24,18 +38,17 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Typecheck
-        run: bunx tsc --noEmit
-
       - name: Test
         run: bun test
 
+      # `build` runs tsc first, so this covers the typecheck too.
       - name: Build
         run: bun run build
 
   rust:
     name: Rust (cargo)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: src-tauri

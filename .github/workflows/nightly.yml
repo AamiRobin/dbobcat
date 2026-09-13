@@ -15,11 +15,14 @@ name: nightly
 on:
   workflow_dispatch:
   schedule:
-    # 02:30 UTC every day.
-    - cron: "30 2 * * *"
+    # 02:30 UTC every Monday. Weekly, not daily — each run burns three
+    # multi-platform runners for ~20-30 minutes; dispatch it manually any
+    # time you want a fresh nightly in between.
+    - cron: "30 2 * * 1"
 
 jobs:
   nightly:
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

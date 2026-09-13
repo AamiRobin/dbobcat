@@ -20,6 +20,7 @@ jobs:
   build:
     name: Release bundles (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -154,6 +155,7 @@ jobs:
     name: Publish release + latest.json
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
