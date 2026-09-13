@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { usePanelRef } from "react-resizable-panels";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -21,6 +22,7 @@ import { dispatchAction, useShortcuts } from "@/lib/shortcuts";
 import { installTabPersistence, restoreTabs } from "@/lib/tab-restore";
 import { installConnStatusListener } from "@/stores/connection";
 import { log } from "@/stores/log";
+import { useUiStore } from "@/stores/ui";
 import {
   installTxStatusListener,
   shouldAskOnQuit,
@@ -75,6 +77,36 @@ function EditorArea() {
 }
 
 function MainSplit() {
+  const logCollapsed = useUiStore((s) => s.logCollapsed);
+  const logPanelRef = usePanelRef();
+  const logSlotRef = useRef<HTMLDivElement>(null);
+
+  // Store flag → panel: collapse shrinks the panel to the MessageLog header
+  // height, docking the strip flush at the window bottom while the editor
+  // reclaims the space. expand() restores the previous height.
+  useEffect(() => {
+    if (logCollapsed) logPanelRef.current?.collapse();
+    else logPanelRef.current?.expand();
+  }, [logCollapsed, logPanelRef]);
+
+  // Panel → store: drags can also collapse the panel (separator dragged past
+  // minSize) or pull a collapsed one back open, so watch the slot's height
+  // and keep the flag (chevron icon, hidden body) in sync. v4's own onResize
+  // proved unreliable here; a plain ResizeObserver is deterministic.
+  useEffect(() => {
+    const el = logSlotRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      // Collapsed = the 28px header strip; expanded min is ~45px (7%).
+      const collapsed = el.getBoundingClientRect().height <= 32;
+      if (useUiStore.getState().logCollapsed !== collapsed) {
+        useUiStore.getState().setLogCollapsed(collapsed);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <ResizablePanelGroup orientation="horizontal" className="min-h-0">
       {/* Sidebar tokens (not plain background) so the tree panel reads as a
@@ -93,13 +125,17 @@ function MainSplit() {
             <EditorArea />
           </ResizablePanel>
           <ResizableHandle />
-          {/*
-            The log panel stays a fixed-height strip while "collapsed" — the
-            chevron in MessageLog's header toggles the store flag; drag-resize
-            still works between minSize and defaultSize.
-          */}
-          <ResizablePanel defaultSize="26" minSize="7">
-            <MessageLog />
+          <ResizablePanel
+            id="message-log"
+            panelRef={logPanelRef}
+            defaultSize="26"
+            minSize="7"
+            collapsible
+            collapsedSize="1.75rem"
+          >
+            <div ref={logSlotRef} className="h-full">
+              <MessageLog />
+            </div>
           </ResizablePanel>
         </ResizablePanelGroup>
       </ResizablePanel>

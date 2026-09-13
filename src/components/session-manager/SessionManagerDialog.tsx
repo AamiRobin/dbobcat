@@ -298,6 +298,8 @@ export function SessionManagerDialog({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<SessionDraft>(newDraft);
   const [secrets, setSecrets] = useState<DraftSecrets>({ password: "", sshPassword: "" });
+  /** Auto-filled name tracking: false for fresh drafts, true once the user edits the field (or loads a saved session). */
+  const [nameTouched, setNameTouched] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -317,6 +319,8 @@ export function SessionManagerDialog({
     setSecrets({ password: "", sshPassword: "" });
     const session = list.find((s) => s.id === id);
     setDraft(session ? draftFromSession(session) : newDraft());
+    // Saved names are user-owned; fresh drafts start under auto-fill.
+    setNameTouched(session ? session.name.trim() !== "" : false);
   }
 
   // When the loaded list changes, make sure a selected row still exists.
@@ -587,6 +591,8 @@ export function SessionManagerDialog({
               onSecretsChange={(s) => setSecrets(s)}
               testResult={testResult}
               testPending={testMutation.isPending}
+              nameTouched={nameTouched}
+              onNameTouched={() => setNameTouched(true)}
               existingGroups={existingGroupPaths(list)}
             />
 

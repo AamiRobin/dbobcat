@@ -62,8 +62,36 @@ export const ENGINE_DEFAULTS: Record<
   sqlite: { host: "", port: 0, user: "" },
 };
 
+/**
+ * Derive a session name from the connection target: `user@host` for server
+ * engines — via the SSH hop when a tunnel is configured, since the database
+ * host is usually 127.0.0.1 through it — and the file stem for SQLite paths.
+ * Empty parts are dropped, so a missing user yields just the host.
+ */
+export function deriveSessionName(draft: SessionDraft): string {
+  if (draft.engine === "sqlite") {
+    const stem = draft.host.split(/[\\/]/).pop()?.replace(/\.(sqlite3?|db)$/i, "");
+    return stem?.trim() ?? "";
+  }
+  const viaSsh = draft.useSsh && draft.sshHost.trim() !== "";
+  const user = (viaSsh ? draft.sshUser : draft.user).trim();
+  const host = (viaSsh ? draft.sshHost : draft.host).trim();
+  return [user, host].filter((part) => part !== "").join("@");
+}
+
+/**
+ * Live auto-fill: stamp the derived name onto the draft unless the user has
+ * taken over the name field (`nameTouched`) or there is nothing to derive.
+ */
+export function withDerivedName(draft: SessionDraft, nameTouched: boolean): SessionDraft {
+  if (nameTouched) return draft;
+  const derived = deriveSessionName(draft);
+  if (derived === "" || derived === draft.name) return draft;
+  return { ...draft, name: derived };
+}
+
 export function newDraft(engine: DbType = "mysql"): SessionDraft {
-  return {
+  const draft: SessionDraft = {
     id: crypto.randomUUID(),
     name: "",
     engine,
@@ -87,6 +115,7 @@ export function newDraft(engine: DbType = "mysql"): SessionDraft {
     txMode: "",
     isolationDefault: "",
   };
+  return withDerivedName(draft, false);
 }
 
 /**

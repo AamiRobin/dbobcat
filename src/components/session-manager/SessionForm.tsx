@@ -39,6 +39,7 @@ import type { IsolationLevel, DbType, TestResult } from "@/types/ipc";
 import {
   draftWithEngine,
   isServerEngine,
+  withDerivedName,
   type SessionDraft,
 } from "./session-draft";
 
@@ -49,6 +50,9 @@ interface SessionFormProps {
   onSecretsChange: (secrets: { password: string; sshPassword: string }) => void;
   testResult: TestResult | null;
   testPending: boolean;
+  /** True once the user edits the name field — auto-fill stands down. */
+  nameTouched: boolean;
+  onNameTouched: () => void;
   /** Known folder paths for the group input's datalist. */
   existingGroups?: string[];
 }
@@ -84,8 +88,13 @@ export function SessionForm({
   testResult,
   testPending,
   existingGroups = [],
+  nameTouched,
+  onNameTouched,
 }: SessionFormProps) {
-  const patch = (partial: Partial<SessionDraft>) => onChange({ ...draft, ...partial });
+  // Every draft mutation funnels through commit so the auto-filled name
+  // keeps following host/user/SSH until the user takes over the field.
+  const commit = (next: SessionDraft) => onChange(withDerivedName(next, nameTouched));
+  const patch = (partial: Partial<SessionDraft>) => commit({ ...draft, ...partial });
   const [browsing, setBrowsing] = useState(false);
   const server = isServerEngine(draft.engine);
 
@@ -97,10 +106,6 @@ export function SessionForm({
       });
       if (path) {
         patch({ host: path });
-        if (draft.name.trim() === "") {
-          const stem = path.split(/[\\/]/).pop()?.replace(/\.(sqlite3?|db)$/i, "");
-          if (stem) onChange({ ...draft, host: path, name: stem });
-        }
       }
     } finally {
       setBrowsing(false);
@@ -118,7 +123,10 @@ export function SessionForm({
             id="session-name"
             value={draft.name}
             placeholder="My local server"
-            onChange={(e) => patch({ name: e.target.value })}
+            onChange={(e) => {
+              onNameTouched();
+              onChange({ ...draft, name: e.target.value });
+            }}
           />
         </Field>
 
@@ -127,7 +135,7 @@ export function SessionForm({
           type="single"
           variant="outline"
           value={draft.engine}
-          onValueChange={(v) => v && onChange(draftWithEngine(draft, v as DbType))}
+          onValueChange={(v) => v && commit(draftWithEngine(draft, v as DbType))}
           className="grid w-full grid-cols-3 gap-2"
         >
           {ENGINE_CARDS.map(({ value, label, hintKey, icon: Icon }) => (

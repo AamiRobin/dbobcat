@@ -3,12 +3,14 @@ import { describe, expect, test } from "bun:test";
 import type { SavedSession } from "@/types/ipc";
 
 import {
+  deriveSessionName,
   draftFromSession,
   draftToSession,
   draftWithEngine,
   isServerEngine,
   newDraft,
   validateDraft,
+  withDerivedName,
 } from "./session-draft";
 
 const baseMysql = (): SavedSession => ({
@@ -102,6 +104,7 @@ describe("per-engine validation", () => {
 
   test("server engines keep the host/port/user rules", () => {
     const draft = newDraft("mysql");
+    draft.name = ""; // auto-fill normally prevents this; test the guard directly
     expect(validateDraft(draft, { password: "", sshPassword: "" })).toMatch(/name is required/i);
 
     draft.name = "x";
@@ -126,6 +129,81 @@ describe("helpers", () => {
     expect(isServerEngine("mysql")).toBe(true);
     expect(isServerEngine("postgres")).toBe(true);
     expect(isServerEngine("sqlite")).toBe(false);
+  });
+});
+
+describe("derived session names", () => {
+  test("new drafts start with the name derived from engine defaults", () => {
+    expect(newDraft("mysql").name).toBe("root@127.0.0.1");
+    expect(newDraft("postgres").name).toBe("postgres@127.0.0.1");
+    // Nothing to derive from until a file is chosen.
+    expect(newDraft("sqlite").name).toBe("");
+  });
+
+  test("user@host from the direct connection", () => {
+    const draft = newDraft("mysql");
+    draft.host = "db.prod.example";
+    draft.user = "app";
+    expect(deriveSessionName(draft)).toBe("app@db.prod.example");
+
+    // Empty parts are dropped rather than rendered as stray separators.
+    draft.user = "";
+    expect(deriveSessionName(draft)).toBe("db.prod.example");
+    draft.host = "";
+    expect(deriveSessionName(draft)).toBe("");
+
+    draft.host = "db.prod.example";
+    draft.user = "app";
+    draft.database = "shop"; // database never leaks into the name
+    expect(deriveSessionName(draft)).toBe("app@db.prod.example");
+  });
+
+  test("SSH tunnel sessions derive from the SSH hop", () => {
+    const draft = newDraft("postgres");
+    draft.useSsh = true;
+    draft.sshHost = "bastion.example";
+    draft.sshUser = "deploy";
+    expect(deriveSessionName(draft)).toBe("deploy@bastion.example");
+
+    draft.sshUser = "";
+    expect(deriveSessionName(draft)).toBe("bastion.example");
+
+    // Tunnel toggled but unconfigured falls back to the direct target.
+    draft.sshHost = "";
+    expect(deriveSessionName(draft)).toBe("postgres@127.0.0.1");
+  });
+
+  test("sqlite derives from the file-path stem", () => {
+    const draft = newDraft("sqlite");
+    draft.host = "/data/exports/report.sqlite3";
+    expect(deriveSessionName(draft)).toBe("report");
+
+    draft.host = "C:\\data\\metrics.db";
+    expect(deriveSessionName(draft)).toBe("metrics");
+
+    draft.host = "/data/no-extension";
+    expect(deriveSessionName(draft)).toBe("no-extension");
+
+    draft.host = "";
+    expect(deriveSessionName(draft)).toBe("");
+  });
+
+  test("withDerivedName stands down when touched or derivable name is empty", () => {
+    const draft = newDraft("mysql");
+    draft.host = "db.prod.example";
+    draft.user = "app";
+
+    const updated = withDerivedName(draft, false);
+    expect(updated.name).toBe("app@db.prod.example");
+
+    // Touched field is user-owned: same draft object, name untouched.
+    draft.name = "My server";
+    expect(withDerivedName(draft, true)).toBe(draft);
+
+    // Empty derivation (sqlite without a path) leaves the draft alone.
+    const lite = newDraft("sqlite");
+    lite.name = "Reserved";
+    expect(withDerivedName(lite, false)).toBe(lite);
   });
 });
 
