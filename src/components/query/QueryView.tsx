@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { format } from "sql-formatter";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { EditorView } from "@codemirror/view";
 import {
@@ -327,12 +326,14 @@ export function QueryView({ tab }: { tab: Tab }) {
     return () => setActiveQueryRunner(null);
   }, []);
 
-  const handleFormat = () => {
+  // Lazy formatter: 288KB most sessions never use, pulled on first Format.
+  const handleFormat = async () => {
     const view = viewRef.current;
     if (!view) return;
     const doc = view.state.doc.toString();
     if (!doc.trim()) return;
     try {
+      const { format } = await import("sql-formatter");
       const formatted = format(doc, {
         language: dialectToFormatterLanguage(dialect),
         tabWidth: 2,
