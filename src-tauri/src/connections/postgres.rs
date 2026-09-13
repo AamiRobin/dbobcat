@@ -50,9 +50,9 @@ use crate::connections::{
     ExecResult, FilterOp, ForeignKeyMeta, GrantDetail, GrantRequest, IndexKind, IndexMeta,
     MaintenanceOp, ObjectKind, ProcessInfo, QueryOutcome, QueryPageRequest, QueryPageResult,
     ResolvedConnectionConfig, ResultColumnMeta, RowChange, RowError, RowValue, RowsChunk,
-    RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateKind, ShowCreateResult,
-    SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TableOptions, TableSchemaData,
-    TriggerMeta, UserMeta, FilterSpec,
+    RoutineKind, RoutineMeta, SchemaCache, ServerInfo, ServerVariable, ShowCreateKind,
+    ShowCreateResult, SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TableOptions,
+    TableSchemaData, TriggerMeta, UserMeta, FilterSpec,
 };
 use crate::error::{AppError, Result};
 
@@ -68,6 +68,8 @@ const MAX_STREAM_CHUNK: usize = 10_000;
 pub struct PgConnection {
     client: Client,
     server_info: ServerInfo,
+    /// Column metadata cache — see [`crate::connections::schema_cache`].
+    schema: SchemaCache,
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +275,28 @@ impl PgConnection {
             })??;
 
         let server_info = fetch_server_info(&client).await?;
-        Ok(Self { client, server_info })
+        Ok(Self {
+            client,
+            server_info,
+            schema: SchemaCache::default(),
+        })
+    }
+
+    /// Live catalog read behind the cached [`Self::describe_table`] trait
+    /// method.
+    async fn describe_table_uncached(
+        &mut self,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<ColumnMeta>> {
+        let relid = self.relid(database, table).await?;
+        let pg_cols = self.load_columns(relid).await?;
+        let pk = self.pk_attnums(relid).await?;
+
+        Ok(pg_cols
+            .iter()
+            .map(|c| pg_column_meta(c, pk.contains(&c.attnum)))
+            .collect())
     }
 
     /// Resolve `db.table` to a relation OID, failing with a stable message.
@@ -1549,14 +1572,16 @@ impl DbConnection for PgConnection {
     }
 
     async fn describe_table(&mut self, database: &str, table: &str) -> Result<Vec<ColumnMeta>> {
-        let relid = self.relid(database, table).await?;
-        let pg_cols = self.load_columns(relid).await?;
-        let pk = self.pk_attnums(relid).await?;
+        if let Some(cached) = self.schema.get(database, table) {
+            return Ok(cached.to_vec());
+        }
+        let columns = self.describe_table_uncached(database, table).await?;
+        self.schema.insert(database, table, columns.clone());
+        Ok(columns)
+    }
 
-        Ok(pg_cols
-            .iter()
-            .map(|c| pg_column_meta(c, pk.contains(&c.attnum)))
-            .collect())
+    fn clear_schema_cache(&mut self) {
+        self.schema.clear();
     }
 
     async fn list_schema_columns(&mut self, database: &str) -> Result<Vec<TableSchemaData>> {
@@ -1977,6 +2002,9 @@ impl DbConnection for PgConnection {
     }
 
     async fn execute(&mut self, sql: &str) -> Result<ExecResult> {
+        // Arbitrary SQL may be DDL — drop the cached columns so the next
+        // describe re-validates against the live schema.
+        self.schema.clear();
         let started = std::time::Instant::now();
         // Compound bodies (CREATE FUNCTION … $$ … $$) survive as one
         // statement via the extended protocol; genuinely multi-statement
@@ -2010,6 +2038,8 @@ impl DbConnection for PgConnection {
     }
 
     async fn run_script(&mut self, sql: &str, stop_on_error: bool) -> Result<Vec<QueryOutcome>> {
+        // Same DDL rationale as `execute`.
+        self.schema.clear();
         let mut outcomes: Vec<QueryOutcome> = Vec::new();
 
         for stmt in split_postgres(sql) {

@@ -41,6 +41,11 @@ pub trait DbConnection: Send {
         table: &str,
     ) -> Result<Vec<ColumnMeta>>;
 
+    /// Drop any cached column metadata. Called after DDL executes and by the
+    /// tree Refresh; drivers that cache must override, the default suits the
+    /// rest.
+    fn clear_schema_cache(&mut self) {}
+
     /// Whole-schema column metadata in one round-trip (ER diagram batch
     /// load). One entry per table; views are not included.
     async fn list_schema_columns(&mut self, database: &str) -> Result<Vec<TableSchemaData>> {

@@ -27,8 +27,8 @@ use crate::connections::{
     CreateUserRequest, DatabaseInfo, DistinctValue, EventMeta, ExecResult, FilterSpec,
     ForeignKeyMeta, GrantDetail, GrantRequest, ProcessInfo, QueryOutcome, QueryPageRequest,
     QueryPageResult, ResolvedConnectionConfig, ResultColumnMeta, RowError, RowValue, RowsChunk,
-    RoutineKind, RoutineMeta, ServerInfo, ServerVariable, ShowCreateKind, ShowCreateResult,
-    SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TableSchemaData,
+    RoutineKind, RoutineMeta, SchemaCache, ServerInfo, ServerVariable, ShowCreateKind,
+    ShowCreateResult, SslMode, StatusVariable, TableDdl, TableKind, TableMeta, TableSchemaData,
     TriggerMeta, UserMeta,
 };
 use crate::error::{AppError, Result};
@@ -149,6 +149,8 @@ pub struct MysqlConnection {
     /// Kept so `close()` can shut the (1-connection) pool down properly.
     pool: Option<Pool>,
     server_info: ServerInfo,
+    /// Column metadata cache — see [`crate::connections::schema_cache`].
+    schema: SchemaCache,
 }
 
 impl MysqlConnection {
@@ -180,6 +182,7 @@ impl MysqlConnection {
             pool: Some(opened.pool),
             conn: Some(opened.conn),
             server_info: opened.server_info,
+            schema: SchemaCache::default(),
         })
     }
 
@@ -203,6 +206,48 @@ impl MysqlConnection {
             Some(row) => col_opt_u64(row, 0),
             None => Ok(None),
         }
+    }
+
+    /// Live catalog read behind the cached [`Self::describe_table`] trait
+    /// method — the only place that hits information_schema.
+    async fn describe_table_uncached(
+        &mut self,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<ColumnMeta>> {
+        // The qualified identifier goes through the quoting helper; both
+        // schema and table names are bound as values inside the WHERE clause.
+        let rows = run_query(
+            self.conn()?,
+            "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, \
+                    COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT \
+             FROM information_schema.COLUMNS \
+             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? \
+             ORDER BY ORDINAL_POSITION",
+            Params::Positional(vec![database.into(), table.into()]),
+        )
+        .await?;
+
+        if rows.is_empty() {
+            return Err(AppError::Db(format!(
+                "table {} not found",
+                quote_qualified(&[database, table])
+            )));
+        }
+
+        rows.iter()
+            .map(|row| {
+                Ok(ColumnMeta {
+                    name: col_string(row, 0)?,
+                    data_type: col_string(row, 1)?,
+                    nullable: col_string(row, 2)?.eq_ignore_ascii_case("YES"),
+                    key: col_opt_string(row, 3)?.filter(|k| !k.is_empty()),
+                    default_value: col_opt_string(row, 4)?,
+                    extra: col_opt_string(row, 5)?.filter(|e| !e.is_empty()),
+                    comment: col_opt_string(row, 6)?.filter(|c| !c.is_empty()),
+                })
+            })
+            .collect()
     }
 
     /// Storage engine of a table (None for views and missing objects).
@@ -810,39 +855,16 @@ impl DbConnection for MysqlConnection {
     }
 
     async fn describe_table(&mut self, database: &str, table: &str) -> Result<Vec<ColumnMeta>> {
-        // The qualified identifier goes through the quoting helper; both
-        // schema and table names are bound as values inside the WHERE clause.
-        let rows = run_query(
-            self.conn()?,
-            "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, \
-                    COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT \
-             FROM information_schema.COLUMNS \
-             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? \
-             ORDER BY ORDINAL_POSITION",
-            Params::Positional(vec![database.into(), table.into()]),
-        )
-        .await?;
-
-        if rows.is_empty() {
-            return Err(AppError::Db(format!(
-                "table {} not found",
-                quote_qualified(&[database, table])
-            )));
+        if let Some(cached) = self.schema.get(database, table) {
+            return Ok(cached.to_vec());
         }
+        let columns = self.describe_table_uncached(database, table).await?;
+        self.schema.insert(database, table, columns.clone());
+        Ok(columns)
+    }
 
-        rows.iter()
-            .map(|row| {
-                Ok(ColumnMeta {
-                    name: col_string(row, 0)?,
-                    data_type: col_string(row, 1)?,
-                    nullable: col_string(row, 2)?.eq_ignore_ascii_case("YES"),
-                    key: col_opt_string(row, 3)?.filter(|k| !k.is_empty()),
-                    default_value: col_opt_string(row, 4)?,
-                    extra: col_opt_string(row, 5)?.filter(|e| !e.is_empty()),
-                    comment: col_opt_string(row, 6)?.filter(|c| !c.is_empty()),
-                })
-            })
-            .collect()
+    fn clear_schema_cache(&mut self) {
+        self.schema.clear();
     }
 
     async fn query_page(&mut self, req: &QueryPageRequest) -> Result<QueryPageResult> {
@@ -1048,10 +1070,15 @@ impl DbConnection for MysqlConnection {
     /// Execute a single statement without client-side splitting (object
     /// editors rely on compound-statement bodies reaching the server whole).
     async fn execute(&mut self, sql: &str) -> Result<ExecResult> {
+        // Arbitrary SQL may be DDL — drop the cached columns so the next
+        // describe re-validates against the live schema.
+        self.schema.clear();
         self.execute_single(sql).await
     }
 
     async fn run_script(&mut self, sql: &str, stop_on_error: bool) -> Result<Vec<QueryOutcome>> {
+        // Same DDL rationale as `execute`.
+        self.schema.clear();
         let mut outcomes: Vec<QueryOutcome> = Vec::new();
 
         for stmt in split_statements(sql) {            let started = std::time::Instant::now();

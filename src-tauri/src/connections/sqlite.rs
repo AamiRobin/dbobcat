@@ -31,7 +31,7 @@ use crate::connections::sql::{
 };
 use crate::connections::traits::DbConnection;
 use crate::connections::{
-    ApplyChangesRequest, ApplyChangesResult, ColumnDef, ColumnMeta,
+    ApplyChangesRequest, ApplyChangesResult, ColumnDef, ColumnMeta, SchemaCache,
     DatabaseInfo, DefaultKind, DistinctValue, EventMeta, ExecResult, FilterSpec, ForeignKeyMeta,
     IndexKind, IndexMeta, MaintenanceOp, ObjectKind, QueryOutcome, QueryPageRequest,
     QueryPageResult, ResolvedConnectionConfig, ResultColumnMeta, RowError, RowValue, RowsChunk,
@@ -111,6 +111,8 @@ pub struct SqliteConnection {
     server_info: ServerInfo,
     /// Pseudo-database name shown in the tree (file stem / "main").
     db_name: String,
+    /// Column metadata cache — see [`crate::connections::schema_cache`].
+    schema: SchemaCache,
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +145,41 @@ impl SqliteConnection {
                 connected_at: Utc::now(),
             },
             db_name: display_name_of(&config.host),
+            schema: SchemaCache::default(),
         })
+    }
+
+    /// Live PRAGMA read behind the cached [`Self::describe_table`] trait
+    /// method.
+    async fn describe_table_uncached(&mut self, table: &str) -> Result<Vec<ColumnMeta>> {
+        let d = SqlDialect::Sqlite;
+        let conn = lock_conn(&self.conn)?;
+        ensure_table_exists(&conn, table)?;
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({})", d.quote_ident(table)))
+            .map_err(rusqlite_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ColumnMeta {
+                    name: row.get(1)?,
+                    data_type: {
+                        let t: String = row.get(2)?;
+                        if t.is_empty() { "BLOB".to_string() } else { t }
+                    },
+                    nullable: row.get::<_, i64>(3)? == 0,
+                    key: if row.get::<_, i64>(5)? > 0 {
+                        Some("PRI".into())
+                    } else {
+                        None
+                    },
+                    default_value: row.get::<_, Option<String>>(4)?.filter(|v| !v.is_empty()),
+                    extra: None,
+                    comment: None,
+                })
+            })
+            .map_err(rusqlite_err)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(rusqlite_err)
     }
 
     /// Display name of the pseudo-database: the file stem (or `main`).
@@ -663,35 +699,21 @@ impl DbConnection for SqliteConnection {
     }
 
     async fn describe_table(&mut self, _database: &str, table: &str) -> Result<Vec<ColumnMeta>> {
-        let d = SqlDialect::Sqlite;
-        let conn = lock_conn(&self.conn)?;
-        ensure_table_exists(&conn, table)?;
-        let mut stmt = conn
-            .prepare(&format!("PRAGMA table_info({})", d.quote_ident(table)))
-            .map_err(rusqlite_err)?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(ColumnMeta {
-                    name: row.get(1)?,
-                    data_type: {
-                        let t: String = row.get(2)?;
-                        if t.is_empty() { "BLOB".to_string() } else { t }
-                    },
-                    nullable: row.get::<_, i64>(3)? == 0,
-                    key: if row.get::<_, i64>(5)? > 0 {
-                        Some("PRI".into())
-                    } else {
-                        None
-                    },
-                    default_value: row.get::<_, Option<String>>(4)?.filter(|v| !v.is_empty()),
-                    extra: None,
-                    comment: None,
-                })
-            })
-            .map_err(rusqlite_err)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(rusqlite_err)
+        // The database argument is ignored (one file per connection) but kept
+        // in the key so all drivers share the same cache convention.
+        let key_db = _database;
+        if let Some(cached) = self.schema.get(key_db, table) {
+            return Ok(cached.to_vec());
+        }
+        let columns = self.describe_table_uncached(table).await?;
+        self.schema.insert(key_db, table, columns.clone());
+        Ok(columns)
     }
+
+    fn clear_schema_cache(&mut self) {
+        self.schema.clear();
+    }
+
 
     async fn list_schema_columns(&mut self, _database: &str) -> Result<Vec<TableSchemaData>> {
         let d = SqlDialect::Sqlite;
@@ -970,6 +992,9 @@ impl DbConnection for SqliteConnection {
     }
 
     async fn execute(&mut self, sql: &str) -> Result<ExecResult> {
+        // Arbitrary SQL may be DDL — drop the cached columns so the next
+        // describe re-validates against the live schema.
+        self.schema.clear();
         let started = std::time::Instant::now();
         let conn = lock_conn(&self.conn)?;
         if split_sqlite(sql).len() > 1 {
@@ -1009,6 +1034,8 @@ impl DbConnection for SqliteConnection {
     }
 
     async fn run_script(&mut self, sql: &str, stop_on_error: bool) -> Result<Vec<QueryOutcome>> {
+        // Same DDL rationale as `execute`.
+        self.schema.clear();
         let mut outcomes: Vec<QueryOutcome> = Vec::new();
 
         for stmt in split_sqlite(sql) {

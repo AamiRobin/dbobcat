@@ -62,6 +62,7 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         schema::db_list_databases,
         schema::db_list_tables,
         schema::db_describe_table,
+        schema::db_clear_schema_cache,
         // data grid
         data::data_query_page,
         data::data_apply_changes,

@@ -12,6 +12,7 @@ pub mod manager;
 pub mod mysql;
 pub mod postgres;
 pub mod reconnect;
+pub mod schema_cache;
 pub mod script;
 pub mod server_admin;
 pub mod sqlite;
@@ -25,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::ssh::SshTunnelConfig;
 use dialect::SqlDialect;
 
+pub use schema_cache::SchemaCache;
 pub use tx::{IsolationLevel, TxEntry, TxLedger, TxMode, TxPhase};
 
 /// Quote a MySQL/MariaDB identifier for embedding in SQL text.

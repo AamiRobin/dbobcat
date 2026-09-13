@@ -111,6 +111,9 @@ enum ConnectionCommand {
         req: QueryPageRequest,
         reply: oneshot::Sender<Result<QueryPageResult>>,
     },
+    ClearSchemaCache {
+        reply: oneshot::Sender<Result<()>>,
+    },
     ApplyChanges {
         req: ApplyChangesRequest,
         reply: oneshot::Sender<Result<ApplyChangesResult>>,
@@ -698,6 +701,12 @@ impl ConnectionManager {
         req: QueryPageRequest,
     ) -> Result<QueryPageResult> {
         self.request(conn_id, |reply| ConnectionCommand::QueryPage { req, reply })
+            .await
+    }
+
+    /// Drop the connection's cached column metadata (tree Refresh, after DDL).
+    pub async fn clear_schema_cache(&self, conn_id: u32) -> Result<()> {
+        self.request(conn_id, |reply| ConnectionCommand::ClearSchemaCache { reply })
             .await
     }
 
@@ -1423,6 +1432,12 @@ async fn connection_task(
             }
             ConnectionCommand::QueryPage { req, reply } => {
                 run_cmd!(reply, driver.query_page(&req));
+            }
+            ConnectionCommand::ClearSchemaCache { reply } => {
+                run_cmd!(reply, async {
+                    driver.clear_schema_cache();
+                    Ok(())
+                });
             }
             ConnectionCommand::ApplyChanges { req, reply } => {
                 ensure_live!();
