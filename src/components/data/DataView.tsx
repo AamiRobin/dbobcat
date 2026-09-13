@@ -159,6 +159,8 @@ function DataViewInner({
   const [offset, setOffset] = useState(0);
   const [orderBy, setOrderBy] = useState<SortSpec[]>([]);
   const [filters, setFilters] = useState<FilterSpec[]>(initialFilters);
+  /** Committed global search term (debounced by the toolbar input). */
+  const [search, setSearch] = useState("");
   const [nonce, setNonce] = useState(0);
   const [pages, setPages] = useState<PageResult[]>([]);
   const [widthOverrides, setWidthOverrides] = useState<Record<string, number>>({});
@@ -195,8 +197,8 @@ function DataViewInner({
 
   // -- data -----------------------------------------------------------------
   const params: DataPageParams = useMemo(
-    () => ({ connId, db, table, pageSize, offset, orderBy, filters }),
-    [connId, db, table, pageSize, offset, orderBy, filters],
+    () => ({ connId, db, table, pageSize, offset, orderBy, filters, search }),
+    [connId, db, table, pageSize, offset, orderBy, filters, search],
   );
   const inputsRef = useRef(params);
   inputsRef.current = params;
@@ -246,13 +248,14 @@ function DataViewInner({
 
   // View-parameter changes wipe accumulated pages for the same reason — and
   // must skip the initial mount the same way, or they'd erase the restore.
-  const viewParamsRef = useRef({ pageSize, orderBy, filters, nonce });
+  const viewParamsRef = useRef({ pageSize, orderBy, filters, nonce, search });
   useEffect(() => {
     const prev = viewParamsRef.current;
-    viewParamsRef.current = { pageSize, orderBy, filters, nonce };
+    viewParamsRef.current = { pageSize, orderBy, filters, nonce, search };
     if (
       prev.pageSize === pageSize &&
       prev.nonce === nonce &&
+      prev.search === search &&
       JSON.stringify(prev.orderBy) === JSON.stringify(orderBy) &&
       JSON.stringify(prev.filters) === JSON.stringify(filters)
     ) {
@@ -261,7 +264,7 @@ function DataViewInner({
     setPages([]);
     setOffset(0);
     setSelectedIds(new Set());
-  }, [pageSize, orderBy, filters, nonce]);
+  }, [pageSize, orderBy, filters, nonce, search]);
 
   // -- derived --------------------------------------------------------------
   const latest = pages[pages.length - 1];
@@ -943,6 +946,8 @@ function DataViewInner({
         selectionCount={selectedIds.size}
         filters={filters}
         orderBy={orderBy}
+        search={search}
+        onSearchChange={setSearch}
         onPageSizeChange={(size) => setPageSize(size)}
         onLoadMore={() => setOffset((o) => o + pageSize)}
         onRefresh={hardReload}
@@ -1108,6 +1113,7 @@ function sameParams(a: DataPageParams, b: DataPageParams): boolean {
     a.table === b.table &&
     a.pageSize === b.pageSize &&
     a.offset === b.offset &&
+    (a.search ?? "") === (b.search ?? "") &&
     JSON.stringify(a.orderBy) === JSON.stringify(b.orderBy) &&
     JSON.stringify(a.filters) === JSON.stringify(b.filters)
   );

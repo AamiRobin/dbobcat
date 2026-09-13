@@ -61,6 +61,8 @@ export interface DataPageParams {
   offset: number;
   orderBy: SortSpec[];
   filters: FilterSpec[];
+  /** Committed "search all columns" term; "" reads unsearched. */
+  search?: string;
 }
 
 export const dataKeys = {
@@ -71,7 +73,7 @@ export const dataKeys = {
     [
       ...dataKeys.table(params.connId, params.db, params.table),
       "page",
-      { pageSize: params.pageSize, offset: params.offset, orderBy: params.orderBy, filters: params.filters },
+      { pageSize: params.pageSize, offset: params.offset, orderBy: params.orderBy, filters: params.filters, search: params.search ?? "" },
     ] as const,
 };
 
@@ -84,6 +86,7 @@ export async function fetchDataPage(params: DataPageParams): Promise<QueryPageRe
     offset: params.offset,
     orderBy: params.orderBy,
     filters: params.filters,
+    search: params.search || null,
   });
 }
 

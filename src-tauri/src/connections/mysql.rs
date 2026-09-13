@@ -852,7 +852,7 @@ impl DbConnection for MysqlConnection {
         // against this description before being quoted into text.
         let columns = self.describe_table(&req.db, &req.table).await?;
         let where_clause =
-            build_where_clause_and(SqlDialect::Mysql, &columns, &req.filters)?;
+            build_where_clause_and(SqlDialect::Mysql, &columns, &req.filters, req.search.as_deref())?;
         let order_clause = build_order_by_clause(SqlDialect::Mysql, &columns, &req.order_by)?;
         let table_q = qualify_table(&req.db, &req.table);
 

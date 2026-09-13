@@ -321,6 +321,10 @@ pub struct QueryPageRequest {
     /// AND-combined WHERE terms; an empty list reads the table unfiltered.
     #[serde(default)]
     pub filters: Vec<FilterSpec>,
+    /// Global "search all columns" term: OR-combined LIKEs across every
+    /// column, AND-ed with `filters`. `None`/blank reads unsearched.
+    #[serde(default)]
+    pub search: Option<String>,
 }
 
 fn default_page_size() -> u32 {

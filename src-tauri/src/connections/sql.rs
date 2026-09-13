@@ -12,6 +12,7 @@
 use mysql_async::Value;
 
 use crate::connections::dialect::{Placeholders, SqlDialect};
+use crate::connections::server_admin::escape_like_wildcards;
 use crate::connections::{
     quote_qualified, CellAssign, ColumnMeta, FilterOp, FilterSpec, RowChange, RowValue,
     SortDirection,
@@ -106,23 +107,28 @@ pub fn filter_op_is_predicate(op: FilterOp) -> bool {
 }
 
 /// Build the `WHERE` clause AND-ing every filter term (`""` when `filters`
-/// is empty), validating each column against the schema and binding every
-/// value.
+/// is empty and no `search` term is given), validating each column against
+/// the schema and binding every value.
 ///
 /// The `in` operator expands [`FilterSpec::values`] into one bound parameter
 /// per item; an empty item list renders `1 = 0` (matches nothing) instead of
 /// invalid `IN ()` syntax. Placeholder numbering is shared across terms so
 /// PostgreSQL's `$n` marks ascend correctly through the whole clause.
+///
+/// `search` adds one OR-combined "any column matches" group (see
+/// [`search_group`]), AND-ed with the filter terms.
 pub fn build_where_clause_and(
     dialect: SqlDialect,
     columns: &[ColumnMeta],
     filters: &[FilterSpec],
+    search: Option<&str>,
 ) -> Result<BuiltSql> {
-    if filters.is_empty() {
+    let search = search.map(str::trim).filter(|s| !s.is_empty());
+    if filters.is_empty() && search.is_none() {
         return Ok(BuiltSql { sql: String::new(), params: Vec::new() });
     }
     let mut marks = Placeholders::new(dialect);
-    let mut parts: Vec<String> = Vec::with_capacity(filters.len());
+    let mut parts: Vec<String> = Vec::with_capacity(filters.len() + 1);
     let mut params = Vec::new();
     for filter in filters {
         let meta = validate_column(columns, &filter.column)?;
@@ -150,10 +156,61 @@ pub fn build_where_clause_and(
         parts.push(format!("{ident} {} {mark}", filter_op_sql(filter.op)));
         params.push(bind_opt(&filter.value));
     }
+    if let Some(term) = search {
+        parts.push(search_group(dialect, columns, term, &mut marks, &mut params));
+    }
     Ok(BuiltSql {
         sql: format!(" WHERE {}", parts.join(" AND ")),
         params,
     })
+}
+
+/// True when a column's driver-native type matches `LIKE` without a cast
+/// (character types, enums, sets). Everything else — numbers, dates, JSON —
+/// is CAST to text first so a search term like `42` finds numeric ids too.
+fn is_text_column(data_type: &str) -> bool {
+    let d = data_type.to_ascii_lowercase();
+    d.contains("char") || d.contains("text") || d.contains("enum") || d.contains("set")
+}
+
+/// Build the "search all columns" OR group: `(col LIKE ? ESCAPE '\' OR
+/// CAST(col AS TEXT) LIKE ? …)`. The term binds once per column as `%term%`
+/// with `%`/`_`/`\` escaped, `ESCAPE '\'` is spelled out because SQLite has
+/// no default escape character, and PostgreSQL uses `ILIKE` for the
+/// case-insensitive matching the other engines get from their collations.
+fn search_group(
+    dialect: SqlDialect,
+    columns: &[ColumnMeta],
+    term: &str,
+    marks: &mut Placeholders,
+    params: &mut Vec<Value>,
+) -> String {
+    let pattern = format!("%{}%", escape_like_wildcards(term));
+    let op = match dialect {
+        SqlDialect::Postgres => "ILIKE",
+        _ => "LIKE",
+    };
+    let cast_type = match dialect {
+        SqlDialect::Mysql => "CHAR",
+        _ => "TEXT",
+    };
+    let mut ors = Vec::with_capacity(columns.len());
+    for col in columns {
+        let ident = dialect.quote_ident(&col.name);
+        let expr = if is_text_column(&col.data_type) {
+            ident
+        } else {
+            format!("CAST({ident} AS {cast_type})")
+        };
+        let mark = marks.mark();
+        ors.push(format!("{expr} {op} {mark} ESCAPE '\\'"));
+        params.push(Value::Bytes(pattern.clone().into_bytes()));
+    }
+    if ors.is_empty() {
+        // Degenerate empty schema: match nothing rather than everything.
+        return "1 = 0".into();
+    }
+    format!("({})", ors.join(" OR "))
 }
 
 /// Build the `WHERE` clause for an optional single-term filter (`""` when
@@ -165,7 +222,9 @@ pub fn build_where_clause(
     filter: Option<&FilterSpec>,
 ) -> Result<BuiltSql> {
     match filter {
-        Some(f) => build_where_clause_and(dialect, columns, std::slice::from_ref(f)),
+        Some(f) => {
+            build_where_clause_and(dialect, columns, std::slice::from_ref(f), None)
+        }
         None => Ok(BuiltSql { sql: String::new(), params: Vec::new() }),
     }
 }
@@ -930,6 +989,7 @@ mod tests {
                     values: Vec::new(),
                 },
             ],
+            None,
         )
         .unwrap();
         assert_eq!(built.sql, " WHERE `name` IN (?, ?) AND `score` > ?");
@@ -942,7 +1002,7 @@ mod tests {
     #[test]
     fn multi_term_and_builder_empty_list_is_empty_clause() {
         let built =
-            build_where_clause_and(SqlDialect::Mysql, &sample_columns(), &[]).unwrap();
+            build_where_clause_and(SqlDialect::Mysql, &sample_columns(), &[], None).unwrap();
         assert_eq!(built.sql, "");
         assert!(built.params.is_empty());
     }
@@ -958,6 +1018,7 @@ mod tests {
                 value: Some("x".into()),
                 values: Vec::new(),
             }],
+            None,
         );
         assert!(err.is_err());
     }
@@ -989,10 +1050,57 @@ mod tests {
                     values: Vec::new(),
                 },
             ],
+            None,
         )
         .unwrap();
         assert_eq!(built.sql, " WHERE \"score\" IS NULL AND \"id\" <= $1 AND \"name\" IS NOT NULL");
         assert_eq!(built.params.len(), 1);
+    }
+
+    #[test]
+    fn search_group_ors_all_columns_casts_non_text_and_escapes() {
+        let built = build_where_clause_and(SqlDialect::Mysql, &sample_columns(), &[], Some("50%"))
+            .unwrap();
+        // `id`/`score` are non-text so they CAST; the term binds as %50\%%.
+        assert_eq!(
+            built.sql,
+            " WHERE (CAST(`id` AS CHAR) LIKE ? ESCAPE '\\' OR `name` LIKE ? ESCAPE '\\' \
+             OR CAST(`score` AS CHAR) LIKE ? ESCAPE '\\')"
+        );
+        let pattern = Value::Bytes(b"%50\\%%".to_vec());
+        assert_eq!(built.params, vec![pattern.clone(), pattern.clone(), pattern]);
+    }
+
+    #[test]
+    fn search_group_ands_with_filters_and_continues_pg_numbering() {
+        let built = build_where_clause_and(
+            SqlDialect::Postgres,
+            &sample_columns(),
+            &[FilterSpec {
+                column: "name".into(),
+                op: FilterOp::Like,
+                value: Some("a".into()),
+                values: Vec::new(),
+            }],
+            Some("zz"),
+        )
+        .unwrap();
+        assert_eq!(
+            built.sql,
+            " WHERE \"name\" LIKE $1 AND (CAST(\"id\" AS TEXT) ILIKE $2 ESCAPE '\\' \
+             OR \"name\" ILIKE $3 ESCAPE '\\' OR CAST(\"score\" AS TEXT) ILIKE $4 ESCAPE '\\')"
+        );
+        assert_eq!(built.params.len(), 4);
+    }
+
+    #[test]
+    fn search_blank_terms_are_ignored() {
+        for s in [None, Some(""), Some("   ")] {
+            let built =
+                build_where_clause_and(SqlDialect::Mysql, &sample_columns(), &[], s).unwrap();
+            assert_eq!(built.sql, "");
+            assert!(built.params.is_empty());
+        }
     }
 
     #[test]

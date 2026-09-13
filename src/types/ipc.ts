@@ -289,6 +289,8 @@ export interface QueryPageRequest {
   orderBy?: SortSpec[];
   /** AND-combined WHERE terms; an empty list reads the table unfiltered. */
   filters: FilterSpec[];
+  /** Global "search all columns" term; null/blank reads unsearched. */
+  search?: string | null;
 }
 
 export interface QueryPageResult {

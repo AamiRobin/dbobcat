@@ -1707,7 +1707,8 @@ impl DbConnection for PgConnection {
             .collect::<Vec<_>>()
             .join(", ");
 
-        let where_clause = build_where_clause_and(d, &columns, &req.filters)?;
+        let where_clause =
+            build_where_clause_and(d, &columns, &req.filters, req.search.as_deref())?;
         // Per-parameter casts: each term's binds carry its own column's type
         // so AND-combined terms stay independently coercible (`in` expands
         // into one bind per value; NULL predicates contribute no binds).

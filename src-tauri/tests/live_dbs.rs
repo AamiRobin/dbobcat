@@ -109,6 +109,7 @@ async fn live_pg_full_path() {
             offset: 0,
             order_by: vec![],
             filters: vec![],
+            search: None,
         })
         .await
         .expect("query page books");
@@ -151,6 +152,7 @@ async fn live_my_full_path() {
             offset: 0,
             order_by: vec![],
             filters: vec![],
+            search: None,
         })
         .await
         .expect("query orders");

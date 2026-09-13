@@ -794,7 +794,8 @@ impl DbConnection for SqliteConnection {
         let d = SqlDialect::Sqlite;
 
         let columns = self.describe_table(&req.db, &req.table).await?;
-        let where_clause = build_where_clause_and(d, &columns, &req.filters)?;
+        let where_clause =
+            build_where_clause_and(d, &columns, &req.filters, req.search.as_deref())?;
         let order_clause = build_order_by_clause(d, &columns, &req.order_by)?;
         let page_size = req.page_size.clamp(1, MAX_PAGE_SIZE);
 

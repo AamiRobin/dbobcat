@@ -7,14 +7,16 @@ import {
   Plus,
   RedoDot,
   RefreshCw,
+  Search,
   Trash2,
   Undo2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -55,6 +57,10 @@ export interface DataToolbarProps {
   /** Active AND-combined WHERE terms (one chip per term). */
   filters: FilterSpec[];
   orderBy: SortSpec[];
+  /** Committed "search all columns" term ("" = off). */
+  search: string;
+  /** Called ~300ms after the last keystroke, and immediately on clear. */
+  onSearchChange: (term: string) => void;
   onPageSizeChange: (size: number) => void;
   onLoadMore: () => void;
   onRefresh: () => void;
@@ -228,6 +234,7 @@ export function DataToolbar(props: DataToolbarProps) {
       </Tooltip>
 
       <div className="ml-auto flex items-center gap-1">
+        <SearchBox search={props.search} onSearchChange={props.onSearchChange} />
         {props.filters.map((filter, index) => (
           <FilterChip
             key={`${filter.column}:${index}`}
@@ -296,6 +303,50 @@ function pruneSucceeded(
         break;
     }
   }
+}
+
+/**
+ * "Search all columns" input. Typing is instant; the term commits to the
+ * parent after a 300 ms idle so each keystroke burst costs one query.
+ * Escape or the × button clears (and commits) immediately.
+ */
+function SearchBox({
+  search,
+  onSearchChange,
+}: {
+  search: string;
+  onSearchChange: (term: string) => void;
+}) {
+  const [raw, setRaw] = useState(search);
+  useEffect(() => {
+    if (raw === search) return; // commit already caught up with typing
+    const t = setTimeout(() => onSearchChange(raw), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raw]);
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && setRaw("")}
+        placeholder="Search all columns…"
+        aria-label="Search all columns"
+        className="h-7 w-44 pl-6 pr-6 text-xs"
+      />
+      {raw !== "" && (
+        <button
+          type="button"
+          aria-label="Clear search"
+          onClick={() => setRaw("")}
+          className="absolute right-1 top-1/2 -translate-y-1/2 rounded-sm px-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
 }
 
 function FilterChip({ filter, onClear }: { filter: FilterSpec; onClear: () => void }) {
