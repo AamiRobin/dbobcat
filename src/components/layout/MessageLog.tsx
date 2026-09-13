@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Eraser, Play, Terminal } from "lucide-react"
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { LOG_HEADER_REM } from "@/components/layout/log-strip";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
 import { useLogStore, type LogLevel } from "@/stores/log";
@@ -40,7 +41,12 @@ export function MessageLog() {
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden" aria-label="Message log">
-      <div className="flex h-7 shrink-0 items-center gap-1 border-b bg-muted/40 px-2">
+      {/* Height is the single-sourced strip geometry: the panel's collapsedSize
+          (App.tsx) must match this row exactly. */}
+      <div
+        className="flex shrink-0 items-center gap-1 border-b bg-muted/40 px-2"
+        style={{ height: LOG_HEADER_REM }}
+      >
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}

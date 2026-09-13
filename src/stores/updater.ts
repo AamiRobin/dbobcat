@@ -41,10 +41,17 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
 
   check: async (opts) => {
     const silent = opts?.silent ?? false;
+    const status = get().status;
     // A running install owns the Update handle: re-querying the feed here
     // would clobber "downloading"/"ready" and let a second downloadAndInstall()
-    // race on the same handle.
-    if (get().status === "downloading" || get().status === "ready") return;
+    // race on the same handle. A finished install still deserves a response,
+    // though — "already installed" beats a silently dead menu item.
+    if (status === "downloading" || status === "ready") {
+      if (status === "ready") {
+        notify.info("Update already installed — restart the app to apply it.");
+      }
+      return;
+    }
 
     const existing = inFlightChecks.get(silent);
     if (existing) return existing;
@@ -87,8 +94,14 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
           return;
         }
         pendingUpdate = update;
+        // A check of the other mode may have just announced this same version
+        // (silent startup + manual menu click racing); don't toast it twice.
+        const alreadyAnnounced =
+          get().status === "available" && get().version === update.version;
         set({ status: "available", version: update.version });
-        notify.info(`Update ${update.version} is available — see the button in the status bar.`);
+        if (!alreadyAnnounced) {
+          notify.info(`Update ${update.version} is available — see the button in the status bar.`);
+        }
         if (previous && previous !== update) void previous.close().catch(() => {});
       } catch (err) {
         // Dev/browser builds have no updater config; only the explicit menu
@@ -106,7 +119,10 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
   },
 
   install: async () => {
-    if (installInFlight) return;
+    // Return the in-flight promise so awaiting install() means "install
+    // finished" (checkForUpdates relies on that), and a second caller
+    // joins the running install instead of firing a no-op.
+    if (installInFlight) return installInFlight;
     const update = pendingUpdate;
     if (!update) return;
     installInFlight = (async () => {
@@ -161,5 +177,6 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
         installInFlight = null;
       }
     })();
+    return installInFlight;
   },
 }));

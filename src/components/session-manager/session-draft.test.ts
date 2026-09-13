@@ -188,7 +188,7 @@ describe("derived session names", () => {
     expect(deriveSessionName(draft)).toBe("");
   });
 
-  test("withDerivedName stands down when touched or derivable name is empty", () => {
+  test("withDerivedName stands down when touched, clears stale names when not", () => {
     const draft = newDraft("mysql");
     draft.host = "db.prod.example";
     draft.user = "app";
@@ -200,10 +200,20 @@ describe("derived session names", () => {
     draft.name = "My server";
     expect(withDerivedName(draft, true)).toBe(draft);
 
-    // Empty derivation (sqlite without a path) leaves the draft alone.
+    // Nothing left to derive: a previously auto-filled name is cleared, not
+    // left stale (e.g. after switching a server draft over to SQLite).
     const lite = newDraft("sqlite");
-    lite.name = "Reserved";
-    expect(withDerivedName(lite, false)).toBe(lite);
+    lite.name = "root@127.0.0.1";
+    expect(withDerivedName(lite, false).name).toBe("");
+
+    // Already empty with nothing to derive: same object, no churn.
+    const fresh = newDraft("sqlite");
+    expect(withDerivedName(fresh, false)).toBe(fresh);
+  });
+
+  test("engine switch clears the stale auto-filled name", () => {
+    const switched = withDerivedName(draftWithEngine(newDraft("mysql"), "sqlite"), false);
+    expect(switched.name).toBe("");
   });
 });
 

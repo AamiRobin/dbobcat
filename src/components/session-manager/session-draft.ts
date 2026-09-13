@@ -81,12 +81,14 @@ export function deriveSessionName(draft: SessionDraft): string {
 
 /**
  * Live auto-fill: stamp the derived name onto the draft unless the user has
- * taken over the name field (`nameTouched`) or there is nothing to derive.
+ * taken over the name field (`nameTouched`). With nothing to derive — a
+ * SQLite draft before a file is chosen — a previously auto-filled value is
+ * cleared rather than left stale (e.g. after switching engines).
  */
 export function withDerivedName(draft: SessionDraft, nameTouched: boolean): SessionDraft {
   if (nameTouched) return draft;
   const derived = deriveSessionName(draft);
-  if (derived === "" || derived === draft.name) return draft;
+  if (derived === draft.name) return draft;
   return { ...draft, name: derived };
 }
 

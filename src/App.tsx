@@ -7,6 +7,7 @@ import { AboutDialog } from "@/components/layout/AboutDialog";
 import { ShortcutsDialog } from "@/components/layout/ShortcutsDialog";
 import { DbTree } from "@/components/db-tree/DbTree";
 import { MessageLog } from "@/components/layout/MessageLog";
+import { LOG_COLLAPSED_THRESHOLD_PX, LOG_HEADER_REM } from "@/components/layout/log-strip";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -97,8 +98,9 @@ function MainSplit() {
     const el = logSlotRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
-      // Collapsed = the 28px header strip; expanded min is ~45px (7%).
-      const collapsed = el.getBoundingClientRect().height <= 32;
+      // Collapsed = the header-height strip; expanded min (7%) sits above it.
+      const collapsed =
+        el.getBoundingClientRect().height <= LOG_COLLAPSED_THRESHOLD_PX;
       if (useUiStore.getState().logCollapsed !== collapsed) {
         useUiStore.getState().setLogCollapsed(collapsed);
       }
@@ -131,7 +133,7 @@ function MainSplit() {
             defaultSize="26"
             minSize="7"
             collapsible
-            collapsedSize="1.75rem"
+            collapsedSize={LOG_HEADER_REM}
           >
             <div ref={logSlotRef} className="h-full">
               <MessageLog />
