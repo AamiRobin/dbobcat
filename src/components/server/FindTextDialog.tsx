@@ -193,6 +193,7 @@ function FindTextDialogInner({
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !running && void run()}
                 placeholder={t("find.placeholder")}
+                className="pl-8"
                 autoFocus
               />
             </div>
