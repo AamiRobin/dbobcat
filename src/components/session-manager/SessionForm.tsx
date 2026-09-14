@@ -50,7 +50,7 @@ interface SessionFormProps {
   onSecretsChange: (secrets: { password: string; sshPassword: string }) => void;
   testResult: TestResult | null;
   testPending: boolean;
-  /** True once the user edits the name field — auto-fill stands down. */
+  /** True once the user edits the name field — auto-fill stands down (clearing it re-arms). */
   nameTouched: boolean;
   onNameTouched: () => void;
   /** Known folder paths for the group input's datalist. */
@@ -124,7 +124,9 @@ export function SessionForm({
             value={draft.name}
             placeholder="My local server"
             onChange={(e) => {
-              onNameTouched();
+              // Typing takes over the name field; clearing it entirely hands
+              // it back, so the next host/user/SSH edit re-fills it.
+              if (e.target.value !== "") onNameTouched();
               onChange({ ...draft, name: e.target.value });
             }}
           />

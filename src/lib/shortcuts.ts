@@ -323,6 +323,14 @@ export async function refreshTree(): Promise<void> {
     log("info", "Nothing to refresh yet — connect to a server first.");
     return;
   }
+  // The grid validates against a backend-side column cache; clear it so it
+  // can't disagree with the freshly loaded tree after external DDL.
+  await ipc("db_clear_schema_cache", { connId }).catch((err) =>
+    log(
+      "warn",
+      `Schema cache reset failed: ${err instanceof Error ? err.message : String(err)}`,
+    ),
+  );
   const { queryClient } = await import("@/lib/query-client");
   const { dbKeys } = await import("@/lib/db-queries");
   await queryClient.invalidateQueries({ queryKey: dbKeys.all(connId) });
