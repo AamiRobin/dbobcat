@@ -1,19 +1,25 @@
-# DBobcat brand mark
+# DBobcat brand icon
 
-A tufted bobcat perched atop its den, drawn as a database cylinder. Geometry is flat fills only (no strokes in the silhouette) so it survives 16 px rasterization.
+A 3D database cylinder with a query-builder badge on a blue rounded tile.
 
-## Palette
+## Files
 
-| Name       | Hex       | Role                          |
-| ---------- | --------- | ----------------------------- |
-| Bedrock    | `#22262E` | Tile ground, nose             |
-| Scree      | `#3B434F` | Den cylinder stone            |
-| Boulder    | `#99A2B1` | Fur                           |
-| Edelweiss  | `#F1EFE7` | Muzzle + belly                |
-| Glacier    | `#57A8C4` | Disc seams, eye glint         |
+- `dbobcat-1024.png` — canonical source (1024×1024 RGBA, square, transparent corners). All app icons are generated from this.
+- `dbobcat-app-icon.png` — 512×512 export used in `README.md`.
 
-## Usage
+## Regenerating app icons
 
-- `dbobcat-mark.svg` — primary mark on its own rounded tile; works on light and dark backgrounds.
-- `dbobcat-mark-dark.svg` — tile-free variant for embedding directly on dark surfaces.
-- `public/dbobcat.svg` — favicon build (seams dropped); regenerate PNGs with `bun scripts/render-brand.ts`, then `bunx tauri icon assets/brand/dbobcat-1024.png`.
+After replacing `dbobcat-1024.png`, run:
+
+```sh
+bunx tauri icon assets/brand/dbobcat-1024.png
+```
+
+This rewrites everything in `src-tauri/icons/` (`icon.icns`, `icon.ico`, and the PNG sizes referenced by `tauri.conf.json`). It also emits `ios/` and `android/` icon sets — delete those folders, this app is desktop-only.
+
+## Other exports
+
+- `src/assets/dbobcat-logo.webp` — About dialog logo (128×128), shown at 24 px.
+- `public/dbobcat.png` — favicon (64×64), referenced from `index.html`.
+
+Regenerate them from the source at any size with e.g. Pillow or sips, keeping the filenames so no code changes are needed.
