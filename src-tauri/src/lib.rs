@@ -156,6 +156,21 @@ pub fn run() {
                     app.state::<LaunchIntentState>().set(intent);
                 }
 
+                // The window starts hidden (tauri.conf.json `visible: false`)
+                // and the frontend shows it once the first painted frame is
+                // committed. Safety net: if the frontend never boots (broken
+                // dev server, JS crash), surface the window anyway rather
+                // than leaving a headless process.
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    if let Some(window) = handle.get_webview_window("main") {
+                        if !window.is_visible().unwrap_or(true) {
+                            let _ = window.show();
+                        }
+                    }
+                });
+
                 #[cfg(desktop)]
                 {
                     // Updater groundwork: the plugin refuses to initialize
