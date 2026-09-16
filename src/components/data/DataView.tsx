@@ -211,23 +211,32 @@ function DataViewInner({
     },
   });
 
-  // Accumulate pages ("Load more"), replacing on page 0 and ignoring any
-  // response that no longer matches the current view parameters.
-  // dataUpdatedAt is required alongside data: structural sharing keeps the
-  // same data reference when nothing changed, which would skip a data-only
-  // dependency and leave a hard-reloaded grid empty.
+  // View-parameter changes wipe accumulated pages so mixed-shape pages never
+  // stack (and must skip the initial mount the same way, or they'd erase the
+  // cached-page restore). The wipe effects are declared BEFORE the accumulate
+  // effect below on purpose: clearing the search returns to an already-cached
+  // key (< 30s staleTime → same data, no refetch), and within that one commit
+  // every changed effect runs — wipes first, then accumulate re-applies the
+  // cached page. The other order would leave a wipe's empty array as the
+  // final state with nothing left to re-trigger accumulation ("No columns"
+  // forever).
+  const viewParamsRef = useRef({ pageSize, orderBy, filters, nonce, search });
   useEffect(() => {
-    const d = query.data;
-    if (!d) return;
-    const current = inputsRef.current;
-    if (d.params.offset !== 0 && !sameParams(d.params, current)) return;
-    setPages((prev) => {
-      if (d.params.offset === 0) return [d];
-      if (prev.some((p) => p.params.offset === d.params.offset)) return prev;
-      return [...prev, d].sort((a, b) => a.params.offset - b.params.offset);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.data, query.dataUpdatedAt]);
+    const prev = viewParamsRef.current;
+    viewParamsRef.current = { pageSize, orderBy, filters, nonce, search };
+    if (
+      prev.pageSize === pageSize &&
+      prev.nonce === nonce &&
+      prev.search === search &&
+      JSON.stringify(prev.orderBy) === JSON.stringify(orderBy) &&
+      JSON.stringify(prev.filters) === JSON.stringify(filters)
+    ) {
+      return;
+    }
+    setPages([]);
+    setOffset(0);
+    setSelectedIds(new Set());
+  }, [pageSize, orderBy, filters, nonce, search]);
 
   // Identity changes wipe accumulated pages immediately (avoid mixed schemas).
   // Mount is skipped via prev-value comparison: db/table are fixed for a
@@ -246,25 +255,25 @@ function DataViewInner({
     setEditingCell(null);
   }, [db, table]);
 
-  // View-parameter changes wipe accumulated pages for the same reason — and
-  // must skip the initial mount the same way, or they'd erase the restore.
-  const viewParamsRef = useRef({ pageSize, orderBy, filters, nonce, search });
+  // Accumulate pages ("Load more"), replacing on page 0 and ignoring any
+  // response that no longer matches the current view parameters. Runs after
+  // the wipe effects above so a same-commit cached-page application survives
+  // the wipe (see the ordering note there).
+  // dataUpdatedAt is required alongside data: structural sharing keeps the
+  // same data reference when nothing changed, which would skip a data-only
+  // dependency and leave a hard-reloaded grid empty.
   useEffect(() => {
-    const prev = viewParamsRef.current;
-    viewParamsRef.current = { pageSize, orderBy, filters, nonce, search };
-    if (
-      prev.pageSize === pageSize &&
-      prev.nonce === nonce &&
-      prev.search === search &&
-      JSON.stringify(prev.orderBy) === JSON.stringify(orderBy) &&
-      JSON.stringify(prev.filters) === JSON.stringify(filters)
-    ) {
-      return;
-    }
-    setPages([]);
-    setOffset(0);
-    setSelectedIds(new Set());
-  }, [pageSize, orderBy, filters, nonce, search]);
+    const d = query.data;
+    if (!d) return;
+    const current = inputsRef.current;
+    if (d.params.offset !== 0 && !sameParams(d.params, current)) return;
+    setPages((prev) => {
+      if (d.params.offset === 0) return [d];
+      if (prev.some((p) => p.params.offset === d.params.offset)) return prev;
+      return [...prev, d].sort((a, b) => a.params.offset - b.params.offset);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query.data, query.dataUpdatedAt]);
 
   // -- derived --------------------------------------------------------------
   const latest = pages[pages.length - 1];
