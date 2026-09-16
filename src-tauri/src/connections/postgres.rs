@@ -468,6 +468,7 @@ async fn fetch_server_info(client: &Client) -> Result<ServerInfo> {
         product: "PostgreSQL".to_string(),
         version: format!("{short} ({database})"),
         dialect: SqlDialect::Postgres,
+        backslash_escapes: true,
         connected_at: Utc::now(),
     })
 }
@@ -1972,7 +1973,6 @@ impl DbConnection for PgConnection {
         let d = SqlDialect::Postgres;
         let columns = self.describe_table(database, table).await?;
         let meta = validate_column(columns.as_slice(), column)?;
-        let cast = cast_type_for(&meta.data_type);
         let built = build_distinct_values_sql(
             d,
             &d.quote_qualified(&[database, table]),
@@ -1982,8 +1982,10 @@ impl DbConnection for PgConnection {
             search,
             limit,
         );
-        // Every parameter is a text payload for this filter column's type.
-        let sql = apply_param_casts(&built.sql, |_| Some(cast.clone()));
+        // The only bound parameter is the LIKE pattern compared against the
+        // ::text projection, so it always casts to text regardless of the
+        // column's own type.
+        let sql = apply_param_casts(&built.sql, |_| Some("text".to_string()));
         let params: Vec<PgParam> = params_from_binds(&built.params);
         let refs: Vec<&(dyn ToSql + Sync)> =
             params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();

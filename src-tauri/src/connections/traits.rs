@@ -361,6 +361,7 @@ impl UnconnectedConnection {
             product: "none".into(),
             version: String::new(),
             dialect: crate::connections::dialect::SqlDialect::Mysql,
+            backslash_escapes: true,
             connected_at: chrono::Utc::now(),
         }
     }

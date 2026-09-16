@@ -130,6 +130,10 @@ pub struct ServerInfo {
     pub version: String,
     /// SQL family this connection speaks; drives per-dialect UI behaviour.
     pub dialect: SqlDialect,
+    /// False only for MySQL/MariaDB sessions running `NO_BACKSLASH_ESCAPES`,
+    /// where inline literals must not double backslashes. Always true for
+    /// PostgreSQL (E'' literals are mode-proof) and SQLite.
+    pub backslash_escapes: bool,
     /// When this connection was established.
     pub connected_at: DateTime<Utc>,
 }

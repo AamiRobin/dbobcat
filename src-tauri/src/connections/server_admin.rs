@@ -24,28 +24,57 @@ use crate::error::{AppError, Result};
 // Literal escaping
 // ---------------------------------------------------------------------------
 
-/// Escape `value` as a single-quoted string literal for `dialect`.
-///
-/// MySQL/MariaDB treat backslash as an escape character inside strings by
-/// default, so backslashes are doubled as well; PostgreSQL only doubles
-/// quotes. The result is safe to embed in DDL/GRANT statements and in
-/// streamed SELECT predicates.
+/// Escape `value` as a single-quoted string literal for `dialect`, assuming
+/// the server's default literal parsing. Prefer [`sql_literal_ex`] wherever
+/// the MySQL session's `NO_BACKSLASH_ESCAPES` state is known.
 pub fn sql_literal(dialect: SqlDialect, value: &str) -> String {
-    let escaped = match dialect {
-        SqlDialect::Mysql => value.replace('\\', "\\\\").replace('\'', "''"),
-        SqlDialect::Postgres | SqlDialect::Sqlite => value.replace('\'', "''"),
-    };
-    format!("'{escaped}'")
+    sql_literal_ex(dialect, value, true)
 }
 
+/// Escape `value` as a single-quoted string literal for `dialect` under a
+/// known `backslash_escapes` posture.
+///
+/// MySQL/MariaDB treat backslash as an escape character inside strings by
+/// default, so backslashes are doubled as well; a session running
+/// `NO_BACKSLASH_ESCAPES` must skip the doubling. PostgreSQL literals are
+/// spelled as escape strings (`E'…'`) so backslash doubling is correct
+/// whether `standard_conforming_strings` is on or off. SQLite never
+/// processes backslashes and has no escape-string syntax. The result is
+/// safe to embed in DDL/GRANT statements and streamed SELECT predicates.
+pub fn sql_literal_ex(dialect: SqlDialect, value: &str, backslash_escapes: bool) -> String {
+    let doubled = value.replace('\\', "\\\\").replace('\'', "''");
+    match dialect {
+        SqlDialect::Mysql if backslash_escapes => format!("'{doubled}'"),
+        SqlDialect::Mysql => format!("'{}'", value.replace('\'', "''")),
+        // E'' processes backslash escapes regardless of the server's
+        // standard_conforming_strings setting, making one spelling correct
+        // for both.
+        SqlDialect::Postgres => format!("E'{doubled}'"),
+        SqlDialect::Sqlite => format!("'{}'", value.replace('\'', "''")),
+    }
+}
+
+/// The SQL clause declaring [`LIKE_ESCAPE`] — append to every LIKE whose
+/// pattern was built by [`escape_like_wildcards`].
+pub const LIKE_ESCAPE_CLAUSE: &str = " ESCAPE '!'";
+
+/// The escape character for LIKE patterns this app builds. Backslash is the
+/// traditional choice but drags string-literal parsing into it — MySQL
+/// spells it `'\\'` unless the session runs `NO_BACKSLASH_ESCAPES`,
+/// PostgreSQL's `'\'` depends on `standard_conforming_strings`. `!` is a
+/// plain one-character literal in every engine and mode, and patterns
+/// escaped with it contain no backslashes at all.
+pub const LIKE_ESCAPE: char = '!';
+
 /// Escape LIKE wildcards (`%`, `_`) and the escape character itself so the
-/// user's text matches literally. Pair with `ESCAPE '\'` in MySQL and with
-/// plain LIKE on PG (default escape is backslash there too).
+/// user's text matches literally. Every pattern built from this must carry
+/// [`LIKE_ESCAPE_CLAUSE`]; a bare backslash escape is not portable across
+/// engines or sql_modes.
 pub fn escape_like_wildcards(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for c in value.chars() {
-        if c == '\\' || c == '%' || c == '_' {
-            out.push('\\');
+        if c == '%' || c == '_' || c == LIKE_ESCAPE {
+            out.push(LIKE_ESCAPE);
         }
         out.push(c);
     }
@@ -519,23 +548,41 @@ mod tests {
     }
 
     #[test]
-    fn pg_literal_keeps_backslashes_verbatim() {
-        assert_eq!(sql_literal(SqlDialect::Postgres, "o'brien"), "'o''brien'");
-        assert_eq!(sql_literal(SqlDialect::Postgres, "a\\b"), "'a\\b'");
+    fn mysql_literal_skips_backslash_doubling_under_no_backslash_escapes() {
+        // A NO_BACKSLASH_ESCAPES session parses \\ literally, so doubling
+        // would corrupt the value instead of protecting it.
+        assert_eq!(sql_literal_ex(SqlDialect::Mysql, "a\\b", false), "'a\\b'");
+        assert_eq!(sql_literal_ex(SqlDialect::Mysql, "o'b", false), "'o''b'");
+    }
+
+    #[test]
+    fn pg_literal_uses_escape_strings() {
+        // E'' processes backslash escapes regardless of the server's
+        // standard_conforming_strings setting — one spelling fits both.
+        assert_eq!(sql_literal(SqlDialect::Postgres, "o'brien"), "E'o''brien'");
+        assert_eq!(sql_literal(SqlDialect::Postgres, "a\\b"), "E'a\\\\b'");
         assert_eq!(
             sql_literal(SqlDialect::Postgres, "'); DROP TABLE x; --"),
-            "'''); DROP TABLE x; --'"
+            "E'''); DROP TABLE x; --'"
         );
-        assert_eq!(sql_literal(SqlDialect::Postgres, ""), "''");
+        assert_eq!(sql_literal(SqlDialect::Postgres, ""), "E''");
+    }
+
+    #[test]
+    fn sqlite_literal_only_doubles_quotes() {
+        assert_eq!(sql_literal(SqlDialect::Sqlite, "a\\b"), "'a\\b'");
+        assert_eq!(sql_literal(SqlDialect::Sqlite, "o'b"), "'o''b'");
     }
 
     // -- LIKE pattern building ----------------------------------------------
 
     #[test]
     fn like_patterns_escape_wildcards_per_mode() {
+        // `!` is the escape char: %, _ and ! itself get prefixed; backslash
+        // is not special in LIKE patterns and passes through untouched.
         assert_eq!(
             build_like_pattern(FindMode::Contains, "50%_off\\").as_deref(),
-            Some("%50\\%\\_off\\\\%")
+            Some("%50!%!_off\\%")
         );
         assert_eq!(
             build_like_pattern(FindMode::Prefix, "abc").as_deref(),
@@ -543,7 +590,11 @@ mod tests {
         );
         assert_eq!(
             build_like_pattern(FindMode::Whole, "a_b").as_deref(),
-            Some("a\\_b")
+            Some("a!_b")
+        );
+        assert_eq!(
+            build_like_pattern(FindMode::Contains, "100!").as_deref(),
+            Some("%100!!%")
         );
         assert_eq!(build_like_pattern(FindMode::Regex, "^ab"), None);
     }

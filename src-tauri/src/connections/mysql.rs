@@ -472,6 +472,15 @@ async fn fetch_server_info(conn: &mut Conn) -> Result<ServerInfo> {
         .flatten()
         .filter(|c| !c.is_empty());
 
+    // NO_BACKSLASH_ESCAPES flips how string literals parse; probe the
+    // session once (best effort — a blocked read leaves the default on).
+    let sql_mode = query_single_scalar(conn, "SELECT @@session.sql_mode")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let backslash_escapes = !sql_mode.to_ascii_uppercase().contains("NO_BACKSLASH_ESCAPES");
+
     Ok(ServerInfo {
         product,
         version: match comment {
@@ -479,6 +488,7 @@ async fn fetch_server_info(conn: &mut Conn) -> Result<ServerInfo> {
             None => version,
         },
         dialect: SqlDialect::Mysql,
+        backslash_escapes,
         connected_at: Utc::now(),
     })
 }
@@ -1605,7 +1615,8 @@ impl DbConnection for MysqlConnection {
     }
 
     async fn show_user_grants(&mut self, user: &str, host: Option<&str>) -> Result<GrantDetail> {
-        let account = account_literal(user, host);
+        let backslash_escapes = self.server_info.backslash_escapes;
+        let account = account_literal(user, host, backslash_escapes);
         let rows = run_query(
             self.conn()?,
             &format!("SHOW GRANTS FOR {account}"),
@@ -1625,13 +1636,15 @@ impl DbConnection for MysqlConnection {
 
     async fn create_user(&mut self, req: &CreateUserRequest) -> Result<()> {
         validate_account_name(&req.user)?;
-        let mut sql = format!("CREATE USER {}", account_literal(&req.user, req.host.as_deref()));
+        let backslash_escapes = self.server_info.backslash_escapes;
+        let account = account_literal(&req.user, req.host.as_deref(), backslash_escapes);
+        let mut sql = format!("CREATE USER {account}");
         match (&req.auth_plugin, &req.password) {
             (Some(plugin), Some(pw)) => {
                 sql.push_str(&format!(
                     " IDENTIFIED WITH {} BY {}",
                     plugin_ident(plugin)?,
-                    server_admin::sql_literal(SqlDialect::Mysql, pw)
+                    server_admin::sql_literal_ex(SqlDialect::Mysql, pw, backslash_escapes)
                 ));
             }
             (Some(plugin), None) => {
@@ -1640,7 +1653,7 @@ impl DbConnection for MysqlConnection {
             (None, Some(pw)) => {
                 sql.push_str(&format!(
                     " IDENTIFIED BY {}",
-                    server_admin::sql_literal(SqlDialect::Mysql, pw)
+                    server_admin::sql_literal_ex(SqlDialect::Mysql, pw, backslash_escapes)
                 ));
             }
             (None, None) => {}
@@ -1655,7 +1668,8 @@ impl DbConnection for MysqlConnection {
         req: &AlterUserRequest,
     ) -> Result<()> {
         validate_account_name(user)?;
-        let base = account_literal(user, host);
+        let backslash_escapes = self.server_info.backslash_escapes;
+        let base = account_literal(user, host, backslash_escapes);
         let mut statements: Vec<String> = Vec::new();
 
         // MySQL keeps RENAME separate from the option list.
@@ -1663,7 +1677,7 @@ impl DbConnection for MysqlConnection {
             validate_account_name(new_name)?;
             statements.push(format!(
                 "ALTER USER {base} RENAME TO {}",
-                account_literal(new_name, host)
+                account_literal(new_name, host, backslash_escapes)
             ));
         }
 
@@ -1678,7 +1692,7 @@ impl DbConnection for MysqlConnection {
             if let Some(pw) = &req.new_password {
                 alter.push_str(&format!(
                     " BY {}",
-                    server_admin::sql_literal(SqlDialect::Mysql, pw)
+                    server_admin::sql_literal_ex(SqlDialect::Mysql, pw, backslash_escapes)
                 ));
             }
             touched = true;
@@ -1719,7 +1733,8 @@ impl DbConnection for MysqlConnection {
 
     async fn drop_user(&mut self, user: &str, host: Option<&str>) -> Result<()> {
         validate_account_name(user)?;
-        self.execute_single(&format!("DROP USER {}", account_literal(user, host)))
+        let account = account_literal(user, host, self.server_info.backslash_escapes);
+        self.execute_single(&format!("DROP USER {account}"))
             .await
             .map(|_| ())
     }
@@ -1728,7 +1743,8 @@ impl DbConnection for MysqlConnection {
         validate_account_name(&req.user)?;
         let scope = server_admin::grant_scope_sql(SqlDialect::Mysql, req)?;
         let privs = server_admin::normalized_privileges(&req.privileges).join(", ");
-        let account = account_literal(&req.user, req.host.as_deref());
+        let backslash_escapes = self.server_info.backslash_escapes;
+        let account = account_literal(&req.user, req.host.as_deref(), backslash_escapes);
         let sql = if req.revoke {
             let grant_option_for = if req.grant_option { "GRANT OPTION FOR " } else { "" };
             format!("REVOKE {grant_option_for}{privs} ON {scope} FROM {account}")
@@ -1825,12 +1841,13 @@ impl DbConnection for MysqlConnection {
 
 /// `'user'@'host'` account literal. Account parts are quoted as string
 /// literals in GRANT/DROP syntax — bind parameters are impossible there, so
-/// both halves go through [`server_admin::sql_literal`].
-fn account_literal(user: &str, host: Option<&str>) -> String {
+/// both halves go through [`server_admin::sql_literal_ex`] with the
+/// session's backslash posture.
+fn account_literal(user: &str, host: Option<&str>, backslash_escapes: bool) -> String {
     format!(
         "{}@{}",
-        server_admin::sql_literal(SqlDialect::Mysql, user),
-        server_admin::sql_literal(SqlDialect::Mysql, host.unwrap_or("%"))
+        server_admin::sql_literal_ex(SqlDialect::Mysql, user, backslash_escapes),
+        server_admin::sql_literal_ex(SqlDialect::Mysql, host.unwrap_or("%"), backslash_escapes)
     )
 }
 

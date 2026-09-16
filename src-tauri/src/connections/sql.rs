@@ -12,7 +12,7 @@
 use mysql_async::Value;
 
 use crate::connections::dialect::{Placeholders, SqlDialect};
-use crate::connections::server_admin::escape_like_wildcards;
+use crate::connections::server_admin::{escape_like_wildcards, LIKE_ESCAPE_CLAUSE};
 use crate::connections::{
     quote_qualified, CellAssign, ColumnMeta, FilterOp, FilterSpec, RowChange, RowValue,
     SortDirection,
@@ -173,11 +173,14 @@ fn is_text_column(data_type: &str) -> bool {
     d.contains("char") || d.contains("text") || d.contains("enum") || d.contains("set")
 }
 
-/// Build the "search all columns" OR group: `(col LIKE ? ESCAPE '\' OR
+/// Build the "search all columns" OR group: `(col LIKE ? ESCAPE '!' OR
 /// CAST(col AS TEXT) LIKE ? …)`. The term binds once per column as `%term%`
-/// with `%`/`_`/`\` escaped, `ESCAPE '\'` is spelled out because SQLite has
-/// no default escape character, and PostgreSQL uses `ILIKE` for the
-/// case-insensitive matching the other engines get from their collations.
+/// with `%`/`_`/`!` escaped by [`escape_like_wildcards`]; the escape clause
+/// is spelled with `!` so it stays a one-character literal under every
+/// engine and sql_mode (see [`LIKE_ESCAPE_CLAUSE`]). SQLite has no default
+/// escape character so the clause is required there, and PostgreSQL uses
+/// `ILIKE` for the case-insensitive matching the other engines get from
+/// their collations.
 fn search_group(
     dialect: SqlDialect,
     columns: &[ColumnMeta],
@@ -203,7 +206,7 @@ fn search_group(
             format!("CAST({ident} AS {cast_type})")
         };
         let mark = marks.mark();
-        ors.push(format!("{expr} {op} {mark} ESCAPE '\\'"));
+        ors.push(format!("{expr} {op} {mark}{LIKE_ESCAPE_CLAUSE}"));
         params.push(Value::Bytes(pattern.clone().into_bytes()));
     }
     if ors.is_empty() {
@@ -423,11 +426,17 @@ pub fn build_distinct_values_sql(
     let ident = dialect.quote_ident(&column.name);
     let cnt = dialect.quote_ident("cnt");
     let mut params = Vec::new();
-    let where_clause = match search {
-        Some(_) => {
+    // "Filter values…" is a substring search: wrap as %term% with wildcards
+    // escaped so user input matches literally. Filtering on `value_expr`
+    // (not the raw column) keeps LIKE on the text projection — PostgreSQL
+    // has no implicit cast for `numeric LIKE text`.
+    let where_clause = match search.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(term) => {
             let mark = dialect.placeholder(1);
-            params.push(bind_opt(&search.map(|s| s.to_string())));
-            format!(" WHERE {ident} LIKE {mark}")
+            params.push(Value::Bytes(
+                format!("%{}%", escape_like_wildcards(term)).into_bytes(),
+            ));
+            format!(" WHERE {value_expr} LIKE {mark}{LIKE_ESCAPE_CLAUSE}")
         }
         None => String::new(),
     };
@@ -1061,13 +1070,15 @@ mod tests {
     fn search_group_ors_all_columns_casts_non_text_and_escapes() {
         let built = build_where_clause_and(SqlDialect::Mysql, &sample_columns(), &[], Some("50%"))
             .unwrap();
-        // `id`/`score` are non-text so they CAST; the term binds as %50\%%.
+        // `id`/`score` are non-text so they CAST; the term binds as %50!%%.
+        // The escape clause's `!` literal parses identically on every engine
+        // and sql_mode.
         assert_eq!(
             built.sql,
-            " WHERE (CAST(`id` AS CHAR) LIKE ? ESCAPE '\\' OR `name` LIKE ? ESCAPE '\\' \
-             OR CAST(`score` AS CHAR) LIKE ? ESCAPE '\\')"
+            " WHERE (CAST(`id` AS CHAR) LIKE ? ESCAPE '!' OR `name` LIKE ? ESCAPE '!' \
+             OR CAST(`score` AS CHAR) LIKE ? ESCAPE '!')"
         );
-        let pattern = Value::Bytes(b"%50\\%%".to_vec());
+        let pattern = Value::Bytes(b"%50!%%".to_vec());
         assert_eq!(built.params, vec![pattern.clone(), pattern.clone(), pattern]);
     }
 
@@ -1087,8 +1098,8 @@ mod tests {
         .unwrap();
         assert_eq!(
             built.sql,
-            " WHERE \"name\" LIKE $1 AND (CAST(\"id\" AS TEXT) ILIKE $2 ESCAPE '\\' \
-             OR \"name\" ILIKE $3 ESCAPE '\\' OR CAST(\"score\" AS TEXT) ILIKE $4 ESCAPE '\\')"
+            " WHERE \"name\" LIKE $1 AND (CAST(\"id\" AS TEXT) ILIKE $2 ESCAPE '!' \
+             OR \"name\" ILIKE $3 ESCAPE '!' OR CAST(\"score\" AS TEXT) ILIKE $4 ESCAPE '!')"
         );
         assert_eq!(built.params.len(), 4);
     }
@@ -1130,13 +1141,13 @@ mod tests {
             name,
             "`name`",
             "COUNT(*)",
-            Some("%an%"),
+            Some("an"),
             50,
         );
         assert_eq!(
             searched.sql,
             "SELECT `name` AS `name`, COUNT(*) AS `cnt` FROM `shop`.`users` \
-             WHERE `name` LIKE ? GROUP BY `name` ORDER BY `cnt` DESC LIMIT 50 OFFSET 0"
+             WHERE `name` LIKE ? ESCAPE '!' GROUP BY `name` ORDER BY `cnt` DESC LIMIT 50 OFFSET 0"
         );
         assert_eq!(searched.params, vec![Value::Bytes(b"%an%".to_vec())]);
     }
@@ -1162,17 +1173,34 @@ mod tests {
         );
         assert_eq!(pg.params.len(), 0);
 
+        // Search wraps as a substring with wildcards escaped, and filters on
+        // the value expression so non-text columns stay comparable to text.
         let lite = build_distinct_values_sql(
             SqlDialect::Sqlite,
             "\"users\"",
             score,
             "\"score\"",
             "COUNT(*)",
-            Some("%x%"),
+            Some("5%  "),
             25,
         );
-        assert!(lite.sql.contains("\"score\" LIKE ?"));
-        assert_eq!(lite.params.len(), 1);
+        assert!(lite
+            .sql
+            .contains("\"score\" LIKE ? ESCAPE '!'"));
+        assert_eq!(lite.params, vec![Value::Bytes(b"%5!%%".to_vec())]);
+
+        // Blank terms behave like no search at all.
+        let blank = build_distinct_values_sql(
+            SqlDialect::Sqlite,
+            "\"users\"",
+            score,
+            "\"score\"",
+            "COUNT(*)",
+            Some("   "),
+            25,
+        );
+        assert!(!blank.sql.contains("LIKE"));
+        assert!(blank.params.is_empty());
     }
 
     #[test]

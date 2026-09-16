@@ -142,6 +142,7 @@ impl SqliteConnection {
                 product: "SQLite".into(),
                 version,
                 dialect: SqlDialect::Sqlite,
+                backslash_escapes: true,
                 connected_at: Utc::now(),
             },
             db_name: display_name_of(&config.host),

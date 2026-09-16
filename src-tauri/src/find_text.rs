@@ -24,7 +24,9 @@ use tauri::{AppHandle, Emitter};
 
 use crate::connections::dialect::SqlDialect;
 use crate::connections::manager::ConnectionManager;
-use crate::connections::server_admin::{compile_regex, sql_literal};
+use crate::connections::server_admin::{
+    compile_regex, escape_like_wildcards, sql_literal_ex, LIKE_ESCAPE_CLAUSE,
+};
 use crate::connections::{ColumnMeta, FindMode, FindTextMatch, FindTextRequest, RowValue};
 use crate::error::{AppError, Result};
 use crate::export::{begin_export, end_export, request_cancel, stream_rows, CancelToken};
@@ -80,7 +82,8 @@ pub async fn find_text(
     conn_id: u32,
     req: FindTextRequest,
 ) -> Result<FindTextResult> {
-    let dialect = manager.server_info(conn_id).await?.dialect;
+    let server_info = manager.server_info(conn_id).await?;
+    let dialect = server_info.dialect;
     if dialect == SqlDialect::Sqlite {
         return Err(AppError::Unsupported(
             "find text on server requires MySQL or PostgreSQL".into(),
@@ -119,8 +122,8 @@ pub async fn find_text(
     let (id, cancel) = begin_export();
 
     let outcome = scan_all(
-        app, manager, conn_id, &req, &search, dialect, plan, total_tables, max_per_table, id,
-        &cancel, started,
+        app, manager, conn_id, &req, &search, dialect, server_info.backslash_escapes, plan,
+        total_tables, max_per_table, id, &cancel, started,
     )
     .await;
 
@@ -136,6 +139,7 @@ async fn scan_all(
     req: &FindTextRequest,
     search: &str,
     dialect: SqlDialect,
+    backslash_escapes: bool,
     plan: Vec<(String, String)>,
     total_tables: usize,
     max_per_table: usize,
@@ -166,7 +170,10 @@ async fn scan_all(
             let pk_names: Vec<String> = pk_cols.iter().map(|c| c.name.clone()).collect();
             let text_col_names: Vec<String> =
                 text_cols.iter().map(|c| c.name.clone()).collect();
-            let sql = build_scan_sql(dialect, db, table, &pk_names, &text_cols, req, search, max_per_table);
+            let sql = build_scan_sql(
+                dialect, db, table, &pk_names, &text_cols, req, search, backslash_escapes,
+                max_per_table,
+            );
             let mut table_matches = 0usize;
 
             let stats = stream_rows(
@@ -274,13 +281,7 @@ fn is_text_column(data_type: &str) -> bool {
 /// Escape LIKE wildcards so user text matches literally, then wrap it into
 /// the mode-specific operand. Regex mode never goes through LIKE.
 fn like_operand(mode: FindMode, raw: &str) -> String {
-    let mut escaped = String::with_capacity(raw.len());
-    for c in raw.chars() {
-        if c == '\\' || c == '%' || c == '_' {
-            escaped.push('\\');
-        }
-        escaped.push(c);
-    }
+    let escaped = escape_like_wildcards(raw);
     match mode {
         FindMode::Contains => format!("%{escaped}%"),
         FindMode::Prefix => format!("{escaped}%"),
@@ -322,6 +323,7 @@ fn build_scan_sql(
     text_cols: &[&ColumnMeta],
     req: &FindTextRequest,
     search: &str,
+    backslash_escapes: bool,
     limit: usize,
 ) -> String {
     let table_q = dialect.quote_qualified(&[db, table]);
@@ -341,20 +343,17 @@ fn build_scan_sql(
         .map(|col| {
             let ident = dialect.quote_ident(&col.name);
             if req.mode == FindMode::Regex {
-                let pattern = sql_literal(dialect, search);
+                let pattern = sql_literal_ex(dialect, search, backslash_escapes);
                 format!("{ident} {} {pattern}", regex_operator(dialect, req.case_sensitive))
             } else {
-                let operand = sql_literal(dialect, &like_operand(req.mode, search));
-                // MySQL needs the escape char written as '\\' (backslash is
-                // a string escape); PostgreSQL's default LIKE escape char is
-                // already backslash and an explicit two-char ESCAPE would be
-                // invalid — so the clause is emitted for MySQL only.
-                let escape_clause = match dialect {
-                    SqlDialect::Mysql => " ESCAPE '\\\\'",
-                    _ => "",
-                };
+                let operand =
+                    sql_literal_ex(dialect, &like_operand(req.mode, search), backslash_escapes);
+                // The escape clause uses `!` so it parses identically
+                // under every engine and sql_mode; PostgreSQL needs it
+                // spelled out (its default escape char is backslash,
+                // which the `!`-escaped pattern never uses).
                 format!(
-                    "{ident} {} {operand}{escape_clause}",
+                    "{ident} {} {operand}{LIKE_ESCAPE_CLAUSE}",
                     like_operator(dialect, req.case_sensitive)
                 )
             }
@@ -473,9 +472,12 @@ mod tests {
 
     #[test]
     fn like_operands_wrap_and_escape() {
-        assert_eq!(like_operand(FindMode::Contains, "a%b_c"), "%a\\%b\\_c%");
-        assert_eq!(like_operand(FindMode::Prefix, "50\\off"), "50\\\\off%");
-        assert_eq!(like_operand(FindMode::Whole, "x_y"), "x\\_y");
+        // `!`-escaping: wildcards and the escape char itself are prefixed;
+        // backslash is not special in LIKE patterns and passes through.
+        assert_eq!(like_operand(FindMode::Contains, "a%b_c"), "%a!%b!_c%");
+        assert_eq!(like_operand(FindMode::Prefix, "50\\off"), "50\\off%");
+        assert_eq!(like_operand(FindMode::Whole, "x_y"), "x!_y");
+        assert_eq!(like_operand(FindMode::Contains, "a!b"), "%a!!b%");
         assert_eq!(like_operand(FindMode::Contains, ""), "%%");
     }
 
@@ -515,12 +517,13 @@ mod tests {
             &text,
             &req,
             "hello",
+            true,
             25,
         );
         assert_eq!(
             sql,
             "SELECT `id`, `name`, `note` FROM `shop`.`orders` \
-             WHERE `name` LIKE '%hello%' ESCAPE '\\\\' OR `note` LIKE '%hello%' ESCAPE '\\\\' \
+             WHERE `name` LIKE '%hello%' ESCAPE '!' OR `note` LIKE '%hello%' ESCAPE '!' \
              LIMIT 25"
         );
     }
@@ -545,12 +548,13 @@ mod tests {
             &text,
             &req,
             "^ab",
+            true,
             1, // clamped ceiling applied by caller
         );
         assert_eq!(
             sql,
             "SELECT ctid::text, \"name\" FROM \"public\".\"events\" \
-             WHERE \"name\" ~* '^ab' LIMIT 1"
+             WHERE \"name\" ~* E'^ab' LIMIT 1"
         );
     }
 
@@ -566,17 +570,45 @@ mod tests {
             case_sensitive: true,
             max_matches_per_table: 5,
         };
-        let mysql = build_scan_sql(SqlDialect::Mysql, "db", "t", &[], &text, &req, "a'b", 5);
+        let mysql = build_scan_sql(SqlDialect::Mysql, "db", "t", &[], &text, &req, "a'b", true, 5);
         assert_eq!(
             mysql,
-            "SELECT `note` FROM `db`.`t` WHERE `note` LIKE BINARY 'a''b' ESCAPE '\\\\' LIMIT 5"
+            "SELECT `note` FROM `db`.`t` WHERE `note` LIKE BINARY 'a''b' ESCAPE '!' LIMIT 5"
         );
 
-        let pg = build_scan_sql(SqlDialect::Postgres, "db", "t", &[], &text, &req, "a'b", 5);
-        // No PK on PG → leading ctid fallback column.
+        let pg = build_scan_sql(SqlDialect::Postgres, "db", "t", &[], &text, &req, "a'b", true, 5);
+        // No PK on PG → leading ctid fallback column; literals go out as
+        // E'' strings and the escape clause is spelled out for PG too.
         assert_eq!(
             pg,
-            "SELECT ctid::text, \"note\" FROM \"db\".\"t\" WHERE \"note\" LIKE 'a''b' LIMIT 5"
+            "SELECT ctid::text, \"note\" FROM \"db\".\"t\" \
+             WHERE \"note\" LIKE E'a''b' ESCAPE '!' LIMIT 5"
+        );
+    }
+
+    #[test]
+    fn scan_sql_literals_follow_backslash_escapes_posture() {
+        let note = col("note", "varchar(20)");
+        let text: Vec<&ColumnMeta> = vec![&note];
+        let req = FindTextRequest {
+            dbs: vec!["db".into()],
+            tables: None,
+            search: "a\\b".into(),
+            mode: FindMode::Contains,
+            case_sensitive: false,
+            max_matches_per_table: 5,
+        };
+        // Default sql_mode: backslashes double inside MySQL literals.
+        let default_mode = build_scan_sql(SqlDialect::Mysql, "db", "t", &[], &text, &req, "a\\b", true, 5);
+        assert_eq!(
+            default_mode,
+            "SELECT `note` FROM `db`.`t` WHERE `note` LIKE '%a\\\\b%' ESCAPE '!' LIMIT 5"
+        );
+        // NO_BACKSLASH_ESCAPES sessions must not double them.
+        let nbe = build_scan_sql(SqlDialect::Mysql, "db", "t", &[], &text, &req, "a\\b", false, 5);
+        assert_eq!(
+            nbe,
+            "SELECT `note` FROM `db`.`t` WHERE `note` LIKE '%a\\b%' ESCAPE '!' LIMIT 5"
         );
     }
 }
