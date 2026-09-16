@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -19,6 +19,7 @@ import { TabsBar } from "@/components/layout/TabsBar";
 import { Toolbar } from "@/components/layout/Toolbar";
 import { onBackendEvent, ipc } from "@/lib/ipc";
 import { consumeLaunchIntent } from "@/lib/launch";
+import { readNumberPref, writePref } from "@/lib/ui-prefs";
 import { dispatchAction, useShortcuts } from "@/lib/shortcuts";
 import { installTabPersistence, restoreTabs } from "@/lib/tab-restore";
 import { installConnStatusListener } from "@/stores/connection";
@@ -77,15 +78,42 @@ function EditorArea() {
   );
 }
 
+/** Save a panel-size pref once the drag settles instead of per RO tick. */
+function saveSizePrefDebounced(
+  key: string,
+  timer: { id?: ReturnType<typeof setTimeout> },
+  value: number,
+) {
+  if (timer.id != null) clearTimeout(timer.id);
+  timer.id = setTimeout(() => writePref(key, value), 400);
+}
+
+/** Percent `el` spans of its owning panel group along `axis`, for persisting
+ * dragged sizes. The log strip lives in a vertical group (height-based), the
+ * sidebar in a horizontal one (width-based). */
+function sizePctOfGroup(el: HTMLElement, axis: "width" | "height"): number | null {
+  const group = el.closest<HTMLElement>('[data-slot="resizable-panel-group"]');
+  if (!group) return null;
+  const groupSize = group.getBoundingClientRect()[axis];
+  if (groupSize <= 0) return null;
+  return (el.getBoundingClientRect()[axis] / groupSize) * 100;
+}
+
 function MainSplit() {
   const logCollapsed = useUiStore((s) => s.logCollapsed);
   const logPanelRef = usePanelRef();
   const logSlotRef = useRef<HTMLDivElement>(null);
+  const sidebarSlotRef = useRef<HTMLDivElement>(null);
+  // Dragged panel sizes persist across restarts; defaults match the markup
+  // that shipped before persistence existed.
+  const [initialSidebarPct] = useState(() => readNumberPref("sidebarSizePct", 10, 60) ?? 22);
+  const [initialLogPct] = useState(() => readNumberPref("logSizePct", 7, 90) ?? 26);
 
   // Store flag → panel: collapse shrinks the panel to the MessageLog header
   // height, docking the strip flush at the window bottom while the editor
-  // reclaims the space. expand() restores the previous height.
-  useEffect(() => {
+  // reclaims the space. expand() restores the previous height. Layout effect
+  // so a restored collapsed strip never paints expanded for a frame.
+  useLayoutEffect(() => {
     if (logCollapsed) logPanelRef.current?.collapse();
     else logPanelRef.current?.expand();
   }, [logCollapsed, logPanelRef]);
@@ -93,20 +121,45 @@ function MainSplit() {
   // Panel → store: drags can also collapse the panel (separator dragged past
   // minSize) or pull a collapsed one back open, so watch the slot's height
   // and keep the flag (chevron icon, hidden body) in sync. v4's own onResize
-  // proved unreliable here; a plain ResizeObserver is deterministic.
+  // proved unreliable here; a plain ResizeObserver is deterministic. The
+  // observed expanded height also feeds the persisted log-size pref.
   useEffect(() => {
     const el = logSlotRef.current;
     if (!el) return;
+    const saveTimer: { id?: ReturnType<typeof setTimeout> } = {};
     const ro = new ResizeObserver(() => {
       // Collapsed = the header-height strip; expanded min (7%) sits above it.
-      const collapsed =
-        el.getBoundingClientRect().height <= LOG_COLLAPSED_THRESHOLD_PX;
+      const height = el.getBoundingClientRect().height;
+      const collapsed = height <= LOG_COLLAPSED_THRESHOLD_PX;
       if (useUiStore.getState().logCollapsed !== collapsed) {
         useUiStore.getState().setLogCollapsed(collapsed);
       }
+      if (!collapsed) {
+        const pct = sizePctOfGroup(el, "height");
+        if (pct != null) saveSizePrefDebounced("logSizePct", saveTimer, pct);
+      }
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      if (saveTimer.id != null) clearTimeout(saveTimer.id);
+    };
+  }, []);
+
+  // Persist the dragged sidebar width the same way.
+  useEffect(() => {
+    const el = sidebarSlotRef.current;
+    if (!el) return;
+    const saveTimer: { id?: ReturnType<typeof setTimeout> } = {};
+    const ro = new ResizeObserver(() => {
+      const pct = sizePctOfGroup(el, "width");
+      if (pct != null) saveSizePrefDebounced("sidebarSizePct", saveTimer, pct);
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      if (saveTimer.id != null) clearTimeout(saveTimer.id);
+    };
   }, []);
 
   return (
@@ -114,11 +167,13 @@ function MainSplit() {
       {/* Sidebar tokens (not plain background) so the tree panel reads as a
           distinct layer over the editor/log area, VS Code-style. */}
       <ResizablePanel
-        defaultSize="22"
+        defaultSize={String(initialSidebarPct)}
         minSize="10"
         className="border-r border-sidebar-border bg-sidebar"
       >
-        <DbTree />
+        <div ref={sidebarSlotRef} className="h-full">
+          <DbTree />
+        </div>
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel minSize="30">
@@ -130,7 +185,7 @@ function MainSplit() {
           <ResizablePanel
             id="message-log"
             panelRef={logPanelRef}
-            defaultSize="26"
+            defaultSize={String(initialLogPct)}
             minSize="7"
             collapsible
             collapsedSize={LOG_HEADER_REM}

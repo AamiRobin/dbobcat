@@ -27,6 +27,7 @@ import {
   type DataPageParams,
 } from "@/lib/db-queries";
 import { base64ToBytes } from "@/lib/blob-view";
+import { readNumberPref, writePref } from "@/lib/ui-prefs";
 import {
   exportGridData,
   pickOpenPath,
@@ -88,6 +89,8 @@ interface PageResult {
 }
 
 const DEFAULT_PAGE_SIZE = 1000;
+/** Keep in step with the toolbar's PAGE_SIZES options. */
+const PAGE_SIZE_PREF_BOUNDS = [500, 5000] as const;
 
 export function DataView({ tab }: { tab: Tab }) {
   const meta = tab.meta as {
@@ -155,7 +158,10 @@ function DataViewInner({
   initialFilters?: FilterSpec[];
 }) {
   // -- paging / view state --------------------------------------------------
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [pageSize, setPageSize] = useState(() => {
+    const saved = readNumberPref("pageSize", PAGE_SIZE_PREF_BOUNDS[0], PAGE_SIZE_PREF_BOUNDS[1]);
+    return saved ?? DEFAULT_PAGE_SIZE;
+  });
   const [offset, setOffset] = useState(0);
   const [orderBy, setOrderBy] = useState<SortSpec[]>([]);
   const [filters, setFilters] = useState<FilterSpec[]>(initialFilters);
@@ -957,7 +963,10 @@ function DataViewInner({
         orderBy={orderBy}
         search={search}
         onSearchChange={setSearch}
-        onPageSizeChange={(size) => setPageSize(size)}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          writePref("pageSize", size);
+        }}
         onLoadMore={() => setOffset((o) => o + pageSize)}
         onRefresh={hardReload}
         onAddRow={onAddRow}

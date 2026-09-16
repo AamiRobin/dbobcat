@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import type { Lang } from "@/lib/i18n";
 import { setLang } from "@/lib/i18n";
+import { readPref, writePref } from "@/lib/ui-prefs";
 
 export type Theme = "dark" | "light";
 /** User preference: explicit choice, or follow the OS appearance. */
@@ -123,7 +124,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   theme: resolveTheme(initialThemePref),
   themePref: initialThemePref,
   lang: "en",
-  logCollapsed: false,
+  // Seeded from storage so a collapsed log strip survives restarts without a
+  // first-paint flash; every setter below keeps the pref in sync.
+  logCollapsed: readPref("logCollapsed") === true,
   dataStats: null,
   sessionManagerOpen: false,
   sessionManagerSelectId: null,
@@ -163,8 +166,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     applyTheme(theme);
   },
 
-  setLogCollapsed: (collapsed) => set({ logCollapsed: collapsed }),
-  toggleLogCollapsed: () => set((s) => ({ logCollapsed: !s.logCollapsed })),
+  setLogCollapsed: (collapsed) => {
+    writePref("logCollapsed", collapsed);
+    set({ logCollapsed: collapsed });
+  },
+  toggleLogCollapsed: () => get().setLogCollapsed(!get().logCollapsed),
 
   setDataStats: (stats) => set({ dataStats: stats }),
   clearDataStats: () => set({ dataStats: null }),
