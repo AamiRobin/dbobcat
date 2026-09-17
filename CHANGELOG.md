@@ -3,6 +3,22 @@
 Notable changes to DBobcat. Formats follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.7] — 2026-09-18
+
+macOS icon release — the Dock icon now renders natively on macOS 26+.
+
+### Fixed
+
+- **macOS icon drawn inside a system-generated frame** — the bundled
+  `icon.icns` carried the rounded-tile artwork with transparent margins,
+  which macOS 26+ treats as a legacy icon: it scales the artwork down and
+  composites it onto an auto-generated squircle with a border. The macOS
+  icon is now compiled from a full-bleed, edge-to-edge variant that the
+  system masks into its own squircle like native apps. Windows and Linux
+  keep the rounded tile. `scripts/make-macos-icon.ts` rebuilds the macOS
+  icon from the canonical tile (or from a hand-made full-bleed export);
+  the workflow is documented in `assets/brand/README.md`.
+
 ## [0.1.2] — 2026-09-12
 
 Update experience release — the app now checks for updates on its own
