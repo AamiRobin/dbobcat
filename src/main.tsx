@@ -24,9 +24,11 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 // The window is created hidden (tauri.conf.json `visible: false`) so the
 // window-state plugin restores geometry invisibly — a restore across Spaces
 // or monitors would otherwise read as the window closing and reopening, and
-// the unpainted webview as a white flash. Double rAF: show once the first
-// frame with real content is actually committed. (Rust also has a timed
-// fallback that shows the window if the frontend never gets here.)
+// the unpainted webview as a white flash. The Rust side shows the window
+// when the page finishes loading (primary path): on macOS WKWebView
+// suspends rAF for a hidden webview, so this double-rAF show would never
+// fire. It stays as the earlier trigger on platforms where hidden-window
+// rAF does run; show/setFocus are idempotent either way.
 if (isTauri) {
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {

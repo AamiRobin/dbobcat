@@ -31,7 +31,7 @@ mod ssh;
 
 use credentials::CredentialStore;
 use ssh::SshTunnelManager;
-use tauri::{Emitter, Manager};
+use tauri::{webview::PageLoadEvent, Emitter, Manager};
 use tauri_plugin_window_state::StateFlags;
 
 use commands::app::{parse_launch_intent, LaunchIntentState};
@@ -112,6 +112,20 @@ pub fn run() {
 
     commands::register_commands(
         tauri::Builder::default()
+            // The window starts hidden (tauri.conf.json `visible: false`) so
+            // the window-state plugin can restore geometry invisibly. The
+            // frontend cannot be the one to show it on macOS: WKWebView
+            // suspends requestAnimationFrame while the window is hidden, so
+            // its double-rAF show path never fires and the window would sit
+            // in limbo. Page-load events don't depend on painting, so show
+            // here the moment the page finishes loading.
+            .on_page_load(|webview, payload| {
+                if webview.label() == "main" && payload.event() == PageLoadEvent::Finished {
+                    let window = webview.window();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            })
             // Single-instance MUST be registered first so a second launch
             // forwards its argv here instead of starting a new process.
             .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -156,14 +170,13 @@ pub fn run() {
                     app.state::<LaunchIntentState>().set(intent);
                 }
 
-                // The window starts hidden (tauri.conf.json `visible: false`)
-                // and the frontend shows it once the first painted frame is
-                // committed. Safety net: if the frontend never boots (broken
-                // dev server, JS crash), surface the window anyway rather
-                // than leaving a headless process.
+                // The window is shown by the page-load hook above. Safety
+                // net: if the frontend never boots (broken dev server, JS
+                // crash), surface the window anyway rather than leaving a
+                // headless process.
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    std::thread::sleep(std::time::Duration::from_secs(2));
                     if let Some(window) = handle.get_webview_window("main") {
                         if !window.is_visible().unwrap_or(true) {
                             let _ = window.show();
