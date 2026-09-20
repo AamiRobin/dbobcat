@@ -3,6 +3,23 @@
 Notable changes to DBobcat. Formats follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.8] — 2026-09-20
+
+Context-menu clarity release — submenu-bearing items now look (and
+behave) the part.
+
+### Fixed
+
+- **Maintenance gave no hint it had a submenu** — in the table and
+  table-group context menus, the Maintenance entry was a hand-rolled
+  nested dropdown: no right-side chevron, it only opened on click as a
+  detached floating menu, and the menu's keyboard navigation could not
+  reach it. It is now a proper attached submenu matching the data grid's
+  (quick filter, copy-as, go-to): a chevron marks it, hovering opens the
+  operation list (Analyze, Optimize, Repair, Check, Flush, Checksum)
+  without a click, clicking works as before, and arrow keys navigate
+  into it.
+
 ## [0.1.7] — 2026-09-18
 
 macOS icon release — the Dock icon now renders natively on macOS 26+.
