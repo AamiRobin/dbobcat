@@ -33,8 +33,7 @@ import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { TreeDialogs } from "@/components/db-tree/dialogs";
 import { useTreeDialogsStore } from "@/components/db-tree/tree-dialogs-store";
 import { Button } from "@/components/ui/button";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Spinner } from "@/components/ui/spinner";
@@ -643,24 +642,19 @@ const MAINT_OPS = [
 
 function MaintenanceSubmenu({ onPick }: { onPick: (op: (typeof MAINT_OPS)[number][0]) => void }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button type="button" className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground" role="menuitem">
-          <Stethoscope className="mr-2 size-4" />
-          Maintenance
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent>
-        <DropdownMenuGroup>
-          {MAINT_OPS.map(([op, label]) => (
-            <DropdownMenuItem key={op} onClick={() => onPick(op)}>
-              {label}
-            </DropdownMenuItem>
-          ))}
-
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <ContextMenuSub>
+      <ContextMenuSubTrigger>
+        <Stethoscope />
+        Maintenance
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent>
+        {MAINT_OPS.map(([op, label]) => (
+          <ContextMenuItem key={op} onClick={() => onPick(op)}>
+            {label}
+          </ContextMenuItem>
+        ))}
+      </ContextMenuSubContent>
+    </ContextMenuSub>
   );
 }
 
