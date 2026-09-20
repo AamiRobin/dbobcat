@@ -67,11 +67,13 @@ function systemTheme(): Theme {
   return systemDarkQuery?.matches ? "dark" : "light";
 }
 
-function resolveTheme(pref: ThemePref): Theme {
+/** Exported for the theme-boot.js drift cases in ui.test.ts, which pin the
+ * pre-paint boot script to the same resolution logic. */
+export function resolveTheme(pref: ThemePref): Theme {
   return pref === "system" ? systemTheme() : pref;
 }
 
-function loadInitialThemePref(): ThemePref {
+export function loadInitialThemePref(): ThemePref {
   try {
     const stored = localStorage.getItem(THEME_PREF_KEY);
     if (stored === "system" || stored === "dark" || stored === "light") return stored;
