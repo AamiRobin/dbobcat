@@ -3,6 +3,22 @@
 Notable changes to DBobcat. Formats follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.9] — 2026-09-21
+
+Launch speed release — the window now appears in well under a second.
+
+### Fixed
+
+- **macOS opened in ~5 seconds** — since 0.1.6 the hidden window was shown
+  by the frontend's first-painted-frame hook (double requestAnimationFrame),
+  but WKWebView suspends rAF while the window is hidden, so the show never
+  fired and every launch sat in limbo until the 5-second safety timer
+  revealed the window. The window is now shown from the Rust side the
+  moment the page finishes loading — measured ~0.35 s to window, ~0.65 s
+  to fully rendered UI, cold or warm. The frontend rAF path stays as an
+  idempotent earlier trigger on platforms where hidden-window rAF works,
+  and the timed fallback shortens from 5 s to 2 s.
+
 ## [0.1.8] — 2026-09-20
 
 Context-menu clarity release — submenu-bearing items now look (and
