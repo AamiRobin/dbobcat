@@ -13,6 +13,7 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useUpdateNodeInternals,
   type OnSelectionChangeParams,
 } from "@xyflow/react";
 import { Network } from "lucide-react";
@@ -328,6 +329,7 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
 
   // Live drag positions (kept out of the rebuild inputs; written on drag stop).
   const livePositions = useRef<Record<string, DiagramPoint>>({});
+  const updateNodeInternals = useUpdateNodeInternals();
 
   useEffect(() => {
     const nextNodes = visible.nodes.map<TableFlowNode>((n) => ({
@@ -340,7 +342,10 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
     }));
     setNodes(nextNodes);
     setEdges(rfEdges);
-  }, [visible.nodes, dataByNode, baseLayout, dia.positions, rfEdges, setNodes, setEdges]);
+    // Replacing node objects resets their measured handle bounds; edges
+    // silently skip until a re-scan, so force one after every rebuild.
+    requestAnimationFrame(() => updateNodeInternals(nextNodes.map((n) => n.id)));
+  }, [visible.nodes, dataByNode, baseLayout, dia.positions, rfEdges, setNodes, setEdges, updateNodeInternals]);
 
   useEffect(() => {
     const map: Record<string, DiagramPoint> = {};
