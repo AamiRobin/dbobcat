@@ -16,6 +16,7 @@ function node(name: string): DiagramNode {
     totalColumns: 0,
     pkNames: [],
     fkColumns: new Set<string>(),
+    referencedColumns: new Set<string>(),
   };
 }
 

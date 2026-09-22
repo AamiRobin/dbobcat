@@ -79,15 +79,18 @@ describe("buildDiagramModel", () => {
     expect(model.edges[0].nullableChild).toBe(true); // customer_id IS NULLable
   });
 
-  test("marks PK columns and collects child-side FK anchors", () => {
+  test("marks PK columns and collects FK + referenced anchors", () => {
     const model = buildDiagramModel(
       [table("customers"), table("orders")],
       columnsByTable,
       [fk("fk_orders_customers", "orders", "customer_id", "customers")],
     );
     const orders = model.nodes.find((n) => n.id === "orders");
+    const customers = model.nodes.find((n) => n.id === "customers");
     expect(orders?.pkNames).toEqual(["id"]);
     expect([...(orders?.fkColumns ?? [])]).toEqual(["customer_id"]);
+    // Parent side collects the referenced column for its source handle.
+    expect([...(customers?.referencedColumns ?? [])]).toEqual(["id"]);
   });
 
   test("skips edges with a missing endpoint (orphan FK)", () => {
@@ -166,11 +169,8 @@ describe("visibleRows / cardHeight", () => {
   });
 
   test("cardHeight accounts for header, rows and footer", () => {
-    const full = cardHeight(wideNode, false, false);
+    const full = cardHeight(wideNode, false);
     expect(full).toBe(CARD_HEADER_HEIGHT + MAX_CARD_ROWS * ROW_HEIGHT + CARD_FOOTER_HEIGHT);
-
-    const collapsed = cardHeight(wideNode, false, true);
-    expect(collapsed).toBe(CARD_HEADER_HEIGHT);
   });
 });
 

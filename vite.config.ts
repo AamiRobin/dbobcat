@@ -37,8 +37,9 @@ export default defineConfig(async () => ({
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
           if (id.includes("sql-formatter")) return "sql-formatter";
-          // Dagre rides the lazy DiagramView chunk, not the entry bundle.
+          // Dagre + React Flow ride the lazy DiagramView chunk, not the entry bundle.
           if (id.includes("@dagrejs") || id.includes("dagre")) return "dagre";
+          if (id.includes("@xyflow") || id.includes("html-to-image")) return "xyflow";
           if (
             id.includes("@codemirror") ||
             id.includes("@uiw") ||

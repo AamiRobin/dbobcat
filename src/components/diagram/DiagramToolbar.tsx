@@ -1,18 +1,24 @@
 import {
+  ClipboardCopy,
   Copy,
   Download,
+  FileCode,
   Image,
   Maximize,
   RefreshCw,
   Search,
   Shrink,
-  UnfoldVertical,
-  FoldVertical,
   X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -20,12 +26,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { t } from "@/lib/i18n";
 
 /**
- * Diagram toolbar strip (h-8): fit / relayout / zoom display, keys-only
- * mode (ToggleGroup), search-in-diagram, collapse & expand all, the
- * Export ▸ menu and refresh.
+ * Diagram toolbar strip (h-8): fit / relayout, keys-only mode (ToggleGroup),
+ * search-in-diagram, the Export ▸ menu (image + copy as SQL/Markdown) and
+ * refresh. Zoom controls live on the canvas (React Flow Controls).
  */
 export interface DiagramToolbarProps {
-  zoom: number;
   keysOnly: boolean;
   busy: boolean;
   onKeysOnlyChange: (keysOnly: boolean) => void;
@@ -37,11 +42,10 @@ export interface DiagramToolbarProps {
   /** "n/total" match counter label, or null when the box is empty. */
   matchLabel: string | null;
   onSearchZoom: () => void;
-  onCollapseAll: () => void;
-  onExpandAll: () => void;
   onExportPng: () => void;
   onExportSvg: () => void;
   onCopyImage: () => void;
+  onCopySql: () => void;
   onRefresh: () => void;
 }
 
@@ -77,10 +81,6 @@ export function DiagramToolbar(props: DiagramToolbarProps) {
       <ToolButton label={t("er.toolbar.relayout")} onClick={props.onRelayout}>
         <Shrink />
       </ToolButton>
-
-      <span className="min-w-9 text-center text-xs tabular-nums text-muted-foreground">
-        {Math.round(props.zoom * 100)}%
-      </span>
 
       <Separator orientation="vertical" className="mx-1 h-4" />
 
@@ -139,23 +139,6 @@ export function DiagramToolbar(props: DiagramToolbarProps) {
         </span>
       )}
 
-      <Separator orientation="vertical" className="mx-1 h-4" />
-
-      <ToolButton
-        label={t("er.toolbar.collapseAll")}
-        onClick={props.onCollapseAll}
-        disabled={props.busy}
-      >
-        <FoldVertical />
-      </ToolButton>
-      <ToolButton
-        label={t("er.toolbar.expandAll")}
-        onClick={props.onExpandAll}
-        disabled={props.busy}
-      >
-        <UnfoldVertical />
-      </ToolButton>
-
       <div className="ml-auto flex items-center gap-1">
         <DropdownMenu>
           <Tooltip>
@@ -176,14 +159,19 @@ export function DiagramToolbar(props: DiagramToolbarProps) {
                 {t("er.toolbar.exportPng")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={props.onExportSvg}>
-                <Download data-icon="inline-start" />
+                <FileCode data-icon="inline-start" />
                 {t("er.toolbar.exportSvg")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={props.onCopyImage}>
                 <Copy data-icon="inline-start" />
                 {t("er.toolbar.copyImage")}
               </DropdownMenuItem>
-
+            </DropdownMenuGroup>
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={props.onCopySql}>
+                <ClipboardCopy data-icon="inline-start" />
+                {t("er.toolbar.copySql")}
+              </DropdownMenuItem>
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>

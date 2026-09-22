@@ -50,7 +50,7 @@ export function layoutDiagram(
     g.setDefaultEdgeLabel(() => ({}));
 
     for (const node of nodes) {
-      const h = heights[node.id] ?? cardHeight(node, false, false);
+      const h = heights[node.id] ?? cardHeight(node, false);
       g.setNode(node.id, { width: CARD_WIDTH, height: h });
     }
     // Parallel edges between the same pair collapse to ONE layout edge —
@@ -72,7 +72,7 @@ export function layoutDiagram(
     for (const node of nodes) {
       const laid = g.node(node.id);
       if (!laid || typeof laid.x !== "number") continue;
-      const h = heights[node.id] ?? cardHeight(node, false, false);
+      const h = heights[node.id] ?? cardHeight(node, false);
       positions[node.id] = { x: laid.x - CARD_WIDTH / 2, y: laid.y - h / 2 };
       width = Math.max(width, laid.x + CARD_WIDTH / 2 + MARGIN);
       height = Math.max(height, laid.y + h / 2 + MARGIN);
@@ -97,7 +97,7 @@ export function gridFallbackLayout(
   nodes.forEach((node, i) => {
     const col = Math.floor(i / perColumn);
     const row = i % perColumn;
-    const h = heights[node.id] ?? cardHeight(node, false, false);
+    const h = heights[node.id] ?? cardHeight(node, false);
     positions[node.id] = {
       x: MARGIN + col * (CARD_WIDTH + NODE_SEP),
       y: MARGIN + row * (h + RANK_SEP),

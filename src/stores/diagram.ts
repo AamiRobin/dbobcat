@@ -4,38 +4,23 @@ import { useTabsStore } from "@/stores/tabs";
 
 /**
  * Per-diagram-tab view state, kept OUT of React so switching tabs (only the
- * active tab is mounted) never loses pan/zoom or drag positions. Keyed by
- * tab id like `stores/query-editor.ts`.
+ * active tab is mounted) never loses drag positions or view toggles. Keyed
+ * by tab id like `stores/query-editor.ts`. Pan/zoom/selection live inside
+ * React Flow; only what persists across tab switches and app restarts is
+ * stored here (positions, hidden tables, keys-only).
  */
-
-export interface DiagramViewport {
-  x: number;
-  y: number;
-  zoom: number;
-}
 
 export interface DiagramPoint {
   x: number;
   y: number;
 }
 
-export const MIN_ZOOM = 0.05;
-export const MAX_ZOOM = 4;
-
 export interface DiagramTabState {
-  /** SVG-space → screen transform: screen = world * zoom + offset. */
-  viewport: DiagramViewport;
-  selection: string | null;
-  hoverId: string | null;
-  /** Collapsed card ids (header-only rendering). */
-  collapsed: Record<string, true>;
-  /** Hidden table ids ("×" on a card); restorable via the status chip. */
-  hidden: string[];
   /** Manual drag positions overriding the computed layout. */
   positions: Record<string, DiagramPoint>;
+  /** Hidden table ids ("×" on a card); restorable via the status chip. */
+  hidden: string[];
   keysOnly: boolean;
-  /** Bump to force a fresh dagre run (Relayout). */
-  layoutNonce: number;
   /**
    * Monotonic-ish stamp (Date.now() at the last patch) used to order the
    * live layout against the persisted snapshot: hydration must not apply a
@@ -46,14 +31,9 @@ export interface DiagramTabState {
 }
 
 export const EMPTY_DIAGRAM_TAB: DiagramTabState = {
-  viewport: { x: 0, y: 0, zoom: 1 },
-  selection: null,
-  hoverId: null,
-  collapsed: {},
-  hidden: [],
   positions: {},
+  hidden: [],
   keysOnly: false,
-  layoutNonce: 0,
   layoutVersion: 0,
 };
 
@@ -100,8 +80,3 @@ useTabsStore.subscribe((next, prev) => {
     }
   }
 });
-
-/** Clamp helper shared by canvas interactions. */
-export function clampZoom(zoom: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
-}

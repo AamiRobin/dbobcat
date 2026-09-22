@@ -275,3 +275,22 @@ html.theme-fade *::after {
     transition-duration: 0.01ms !important;
   }
 }
+/* ER diagram: marching dashes on emphasized FK edges (selected/related).
+   Base edges stay solid — only selection lights the animation up. */
+.rfk-edge-animated path.react-flow__edge-path {
+  stroke-dasharray: 6 4;
+  animation: rfk-dash 0.5s linear infinite;
+}
+@keyframes rfk-dash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+/* ER diagram export: html-to-image freezes each element's computed width,
+   and inside the serialized SVG WebKit may fall back to slightly wider
+   glyph metrics — ellipsis would then truncate labels that fit on screen.
+   During capture, clip instead of ellipsizing. */
+.er-capture-clip .truncate {
+  text-overflow: clip !important;
+}

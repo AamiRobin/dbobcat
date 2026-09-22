@@ -1,19 +1,20 @@
 import type { ColumnMeta, ForeignKeyMeta, TableMeta } from "@/types/ipc";
 
 /**
- * Pure diagram model (Phase 11): turns batch schema data into the node/edge
- * graph the canvas renders. No layout math here — see diagram-layout.ts.
+ * Pure diagram model: turns batch schema data into the node/edge graph the
+ * ER view renders. No layout math here — see diagram-layout.ts.
  *
- * Notation: crow's foot at the CHILD ("many") end of every edge. Filled
- * foot = mandatory child column, outline foot = nullable child column,
- * plain line = composite constraint (per-column cardinality ambiguous).
+ * Notation: FK edges run parent → child and anchor at the exact column rows
+ * (per-column React Flow handles). Filled/emphasized treatment on the child
+ * end for mandatory columns, dimmer for nullable; composite constraints draw
+ * a plain line (per-column cardinality ambiguous).
  */
 
-/** Card geometry shared by the renderer, the layouter and the exporter. */
-export const CARD_WIDTH = 200;
-export const ROW_HEIGHT = 20;
-export const CARD_HEADER_HEIGHT = 26;
-export const CARD_FOOTER_HEIGHT = 18;
+/** Card geometry shared by the renderer and the layouter. Matches TableNode. */
+export const CARD_WIDTH = 240;
+export const ROW_HEIGHT = 22;
+export const CARD_HEADER_HEIGHT = 30;
+export const CARD_FOOTER_HEIGHT = 20;
 /** Rows shown before the "+N more" footer kicks in. */
 export const MAX_CARD_ROWS = 24;
 /** Above this many tables the default flips to keys-only (readability). */
@@ -28,6 +29,8 @@ export interface DiagramNode {
   pkNames: string[];
   /** Child-side FK column names (anchor dots on rows). */
   fkColumns: Set<string>;
+  /** Parent-side column names referenced by other tables' FKs (source anchors). */
+  referencedColumns: Set<string>;
 }
 
 export interface DiagramEdge {
@@ -81,6 +84,7 @@ export function buildDiagramModel(
       totalColumns: columns.length,
       pkNames: columns.filter((c) => c.key === "PRI").map((c) => c.name),
       fkColumns: new Set<string>(),
+      referencedColumns: new Set<string>(),
     });
   }
 
@@ -112,9 +116,10 @@ export function buildDiagramModel(
     });
   }
 
-  // Child-side FK anchors (dots on matching rows).
+  // Edge anchors: child-side FK dots and parent-side source anchors.
   for (const edge of edges) {
     nodesById.get(edge.target)?.fkColumns.add(edge.targetColumn);
+    nodesById.get(edge.source)?.referencedColumns.add(edge.sourceColumn);
   }
 
   return {
@@ -156,9 +161,8 @@ export function visibleRows(node: DiagramNode, keysOnly: boolean): NodeRows {
   };
 }
 
-/** Full rendered height of a card (layout + hit-testing use this). */
-export function cardHeight(node: DiagramNode, keysOnly: boolean, collapsed: boolean): number {
-  if (collapsed) return CARD_HEADER_HEIGHT;
+/** Rendered height of a card under the current keys-only flag (layout input). */
+export function cardHeight(node: DiagramNode, keysOnly: boolean): number {
   const rowCount =
     keysOnly ? visibleRows(node, true).rows.length : Math.min(node.totalColumns, MAX_CARD_ROWS);
   const hasMore =
