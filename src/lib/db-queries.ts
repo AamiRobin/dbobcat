@@ -34,6 +34,21 @@ export async function fetchDatabases(connId: number): Promise<DatabaseInfo[]> {
   return ipc<DatabaseInfo[]>("db_list_databases", { connId });
 }
 
+/** CREATE DATABASE (MySQL/PostgreSQL); SQLite is rejected by the backend. */
+export function createDatabase(
+  connId: number,
+  name: string,
+  charset?: string | null,
+  collation?: string | null,
+): Promise<void> {
+  return ipc<void>("db_create_database", {
+    connId,
+    name,
+    charset: charset || null,
+    collation: collation || null,
+  });
+}
+
 export async function fetchTables(connId: number, database: string): Promise<TableMeta[]> {
   return ipc<TableMeta[]>("db_list_tables", { connId, db: database });
 }

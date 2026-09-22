@@ -308,6 +308,7 @@ export const en = {
   "tree.filterHint": "Substring or regular expression — matches databases and objects.",
   "tree.filterClear": "Clear filter",
   "tree.favoritesOnly": "Favorites only",
+  "tree.newDatabase": "New database",
   "tree.favorite.add": "Toggle favorite",
   "tree.favorite.remove": "Toggle favorite",
   "tree.toggleColumns": "Toggle columns",

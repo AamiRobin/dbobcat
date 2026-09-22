@@ -60,6 +60,7 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         tx::tx_set_isolation,
         // schema browsing
         schema::db_list_databases,
+        schema::db_create_database,
         schema::db_list_tables,
         schema::db_describe_table,
         schema::db_clear_schema_cache,

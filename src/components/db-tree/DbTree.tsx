@@ -1373,6 +1373,12 @@ function DatabaseNode({
               <Network />
               View ER Diagram
             </ContextMenuItem>
+            {dialect !== "sqlite" && (
+              <ContextMenuItem onClick={() => dialogs.openCreateDatabase()}>
+                <Plus />
+                Create Database…
+              </ContextMenuItem>
+            )}
             <ContextMenuItem onClick={() => openDesignerTab(connId, name)}>
               <Plus />
               Create Table
@@ -1483,6 +1489,7 @@ function ConnectedTree({ connId }: { connId: number }) {
   const dialect = useConnectionStore((s) => s.serverInfo?.dialect ?? "mysql");
   const sessionColor = useConnectionStore((s) => s.session?.color ?? null);
   const sessionId = useConnectionStore((s) => s.session?.sessionId ?? null);
+  const dialogs = useTreeDialogsStore();
   const databases = useQuery({
     queryKey: dbKeys.databases(connId),
     queryFn: () => fetchDatabases(connId),
@@ -1607,6 +1614,22 @@ function ConnectedTree({ connId }: { connId: number }) {
               </button>
             )}
           </div>
+          {dialect !== "sqlite" && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="size-6"
+                  aria-label={t("tree.newDatabase")}
+                  onClick={dialogs.openCreateDatabase}
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("tree.newDatabase")}</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

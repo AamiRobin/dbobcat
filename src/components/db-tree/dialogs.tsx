@@ -17,7 +17,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { TREE_STALE_TIME, dbKeys, fetchDatabases } from "@/lib/db-queries";
+import { TREE_STALE_TIME, createDatabase, dbKeys, fetchDatabases } from "@/lib/db-queries";
 import { diaKeys } from "@/lib/diagram-queries";
 import {
   bulkAlterTables,
@@ -63,6 +63,7 @@ export function TreeDialogs() {
       <PromptDialog />
       <CopyTableDialog />
       <BulkAlterDialog />
+      <CreateDatabaseDialog />
     </>
   );
 }
@@ -699,6 +700,121 @@ function BulkAlterDialog() {
               Apply to {selected.size} table{selected.size === 1 ? "" : "s"}
             </Button>
           )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Create database (MySQL/PostgreSQL) — SQLite is file-per-database
+// ---------------------------------------------------------------------------
+
+function CreateDatabaseDialog() {
+  const open = useTreeDialogsStore((s) => s.createDatabase);
+  const closeAll = useTreeDialogsStore((s) => s.closeAll);
+  const connId = useConnectionStore((s) => s.connId);
+  const dialect = useConnectionStore((s) => s.serverInfo?.dialect);
+  const queryClient = useQueryClient();
+
+  const [name, setName] = useState("");
+  const [charset, setCharset] = useState("");
+  const [collation, setCollation] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setName("");
+      setCharset("");
+      setCollation("");
+      setBusy(false);
+    }
+  }, [open]);
+
+  if (!open || connId === null || dialect === "sqlite") return null;
+  const mysql = dialect === undefined || dialect === "mysql";
+
+  const submit = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    try {
+      await createDatabase(connId, trimmed, charset || null, collation || null);
+      notify.success(`Database \`${trimmed}\` created.`);
+      void queryClient.invalidateQueries({ queryKey: dbKeys.databases(connId) });
+      closeAll();
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AlertDialog open onOpenChange={(o) => !o && closeAll()}>
+      <AlertDialogContent className="sm:max-w-sm">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Create database</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div>Creates an empty database on the server.</div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <Field>
+          <FieldLabel htmlFor="new-db-name" className="text-xs text-muted-foreground">
+            Name
+          </FieldLabel>
+          <Input
+            id="new-db-name"
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void submit()}
+            placeholder="my_database"
+            className="font-mono text-xs"
+            aria-label="New database name"
+          />
+        </Field>
+        {mysql && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field>
+              <FieldLabel className="text-xs text-muted-foreground">Character set</FieldLabel>
+              <Select
+                value={charset || KEEP}
+                onValueChange={(v) => setCharset(v === KEEP ? "" : v)}
+              >
+                <SelectTrigger size="sm" aria-label="Character set">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value={KEEP} className="text-xs">
+                      (server default)
+                    </SelectItem>
+                    {CHARSETS.map((c) => (
+                      <SelectItem key={c} value={c} className="text-xs">
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel className="text-xs text-muted-foreground">Collation</FieldLabel>
+              <Input
+                value={collation}
+                placeholder="(server default)"
+                onChange={(e) => setCollation(e.target.value)}
+                className="h-7 font-mono text-xs"
+              />
+            </Field>
+          </div>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button size="sm" disabled={busy || !name.trim()} onClick={() => void submit()}>
+            {busy && <Spinner data-icon="inline-start" />}
+            Create
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
