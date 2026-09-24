@@ -1060,7 +1060,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "dbobcat"
-version = "0.1.9"
+version = "0.1.11"
 dependencies = [
  "aes-gcm",
  "argon2 0.5.3",
