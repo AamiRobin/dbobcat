@@ -123,6 +123,46 @@ export function openTab(type: TabType): Tab {
   return useTabsStore.getState().openTab(type);
 }
 
+// ---------------------------------------------------------------------------
+// Active table reference (the tree's selection source of truth)
+// ---------------------------------------------------------------------------
+
+/** Stable equality key for one table on one connection. */
+export function tableKey(connId: number, db: string, table: string): string {
+  // JSON form: db/table names may contain any character, so the key must
+  // stay unambiguous (db "a:b" + table "c" vs db "a" + table "b:c").
+  return JSON.stringify([connId, db, table]);
+}
+
+export interface ActiveTableRef {
+  connId: number;
+  db: string;
+  table: string;
+}
+
+/**
+ * The table the user is currently looking at: the active tab when it targets
+ * one specific table (data grid or table designer). Null for query/diagram/
+ * server-tool tabs and create-mode designers. The tree derives its selection
+ * highlight from this, so the highlight always follows the active tab.
+ */
+export function activeTableRef(state: { tabs: Tab[]; activeId: string | null }): ActiveTableRef | null {
+  const active = state.tabs.find((t) => t.id === state.activeId);
+  if (!active || (active.type !== "data" && active.type !== "designer")) return null;
+  const { connId, db, table } = active.meta;
+  if (typeof connId !== "number" || typeof db !== "string" || typeof table !== "string") return null;
+  return { connId, db, table };
+}
+
+/** `activeTableRef` as an equality key scoped to one connection. */
+export function activeTableKeyFor(
+  state: { tabs: Tab[]; activeId: string | null },
+  connId: number,
+): string | null {
+  const ref = activeTableRef(state);
+  return ref !== null && ref.connId === connId ? tableKey(ref.connId, ref.db, ref.table) : null;
+}
+
 /**
  * Retarget the data tab of a renamed/moved table so the open grid follows
  * the table instead of serving ghost data under the old name. At most one

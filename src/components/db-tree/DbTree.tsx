@@ -24,7 +24,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { openExportDialog } from "@/stores/export-dialog";
 import { openImportWizard } from "@/stores/import-dialog";
@@ -64,12 +64,16 @@ import { compileTreeFilter, type TreeMatcher } from "@/lib/tree-filter";
 import { invalidateTableArtifacts } from "@/lib/table-invalidate";
 import { useConnectionStore } from "@/stores/connection";
 import {
+  activeTableKeyFor,
+  activeTableRef,
   closeDataTabs,
   openDataTable,
   openDesignerTab,
   openDiagramTab,
   openObjectEditorTab,
   retargetDataTabs,
+  tableKey,
+  useTabsStore,
 } from "@/stores/tabs";
 import type {
   ColumnMeta,
@@ -95,6 +99,11 @@ import type {
  * invalidates queries; expansion, scroll position, filter text and
  * favorites-only state live in component state keyed by stable node keys,
  * so they all survive refreshes.
+ *
+ * Selection: the row of the table targeted by the active data/designer tab
+ * is highlighted and scrolled into view (derived from the tabs store — see
+ * activeTableRef in stores/tabs.ts — so FK jumps, palette opens, tab clicks
+ * and session restore all keep the tree in sync for free).
  */
 
 // ---------------------------------------------------------------------------
@@ -168,6 +177,10 @@ interface RowProps {
   children: React.ReactNode;
   menu: React.ReactNode;
   className?: string;
+  /** Tracks the active data/designer tab (see activeTableRef in tabs.ts). */
+  selected?: boolean;
+  /** DOM handle for scroll-into-view when selection arrives from a tab. */
+  rowRef?: React.Ref<HTMLButtonElement>;
   /** HTML5 drag & drop (table move, session regroup). */
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
@@ -185,6 +198,8 @@ function TreeRow({
   children,
   menu,
   className,
+  selected = false,
+  rowRef,
   draggable,
   onDragStart,
   onDragOver,
@@ -196,6 +211,7 @@ function TreeRow({
       <ContextMenuTrigger asChild>
         <button
           type="button"
+          ref={rowRef}
           onClick={onToggle}
           onDoubleClick={onDoubleClick}
           draggable={draggable}
@@ -203,8 +219,10 @@ function TreeRow({
           onDragOver={onDragOver}
           onDrop={onDrop}
           onDragEnd={onDragEnd}
+          aria-current={selected ? "true" : undefined}
           className={cn(
             "flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-xs transition-colors hover:bg-accent",
+            selected && "bg-accent",
             className,
           )}
         >
@@ -229,7 +247,7 @@ function TreeRow({
                   onChevronToggle(e as unknown as React.MouseEvent);
                 }
               }}
-              className="shrink-0 rounded hover:bg-accent"
+              className="shrink-0 rounded-sm hover:bg-accent"
             >
               <Chevron open={open} />
             </span>
@@ -267,7 +285,7 @@ function FavoriteStar({ db, table }: { db: string; table: string }) {
           toggleFavorite(db, table);
         }
       }}
-      className="ml-auto mr-0.5 shrink-0 rounded p-0.5 hover:bg-accent"
+      className="ml-auto mr-0.5 shrink-0 rounded-sm p-0.5 hover:bg-accent"
     >
       <Star
         className={cn(
@@ -346,6 +364,17 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
   const queryClient = useQueryClient();
   const dialogs = useTreeDialogsStore();
   const filtering = useFiltering();
+  // Selection follows the active data/designer tab; a boolean selector, so
+  // only the two rows whose state flips re-render on a tab switch.
+  const selected = useTabsStore(
+    (s) => activeTableKeyFor(s, connId) === tableKey(connId, database, table.name),
+  );
+  const rowRef = useRef<HTMLButtonElement>(null);
+  // Keep the highlighted row visible when the selection arrives from a tab
+  // click / FK jump / palette rather than a click on this row.
+  useEffect(() => {
+    if (selected) rowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
 
   const applyMove = async () => {
     if (pendingMoveDb === null) return;
@@ -414,6 +443,8 @@ function TableNode({ connId, database, table }: { connId: number; database: stri
     <li>
       <TreeRow
         open={open}
+        selected={selected}
+        rowRef={rowRef}
         // A single click on the row only opens the table's data grid
         // (repeated clicks refocus the existing tab); the chevron alone
         // expands/collapses the column list.
@@ -1300,6 +1331,38 @@ function favoriteEntriesFor(favorites: Set<string>, database: string): string[] 
   return [...favorites].filter((key) => key.startsWith(prefix));
 }
 
+/** A starred table in favorites-only mode; selectable like a TableNode. */
+function FavoriteEntryRow({
+  connId,
+  entry,
+}: {
+  connId: number;
+  entry: { db: string; table: string };
+}) {
+  const selected = useTabsStore(
+    (s) => activeTableKeyFor(s, connId) === tableKey(connId, entry.db, entry.table),
+  );
+  const openEntry = () => openDataTable(connId, entry.db, entry.table);
+  return (
+    <li>
+      <TreeRow
+        selected={selected}
+        onToggle={openEntry}
+        onDoubleClick={openEntry}
+        menu={
+          <>
+            <ToggleFavoriteItem db={entry.db} table={entry.table} />
+            <CopyNameItem name={entry.table} />
+          </>
+        }
+      >
+        <Table className="size-3.5 shrink-0 text-warning" />
+        <span className="truncate">{entry.table}</span>
+      </TreeRow>
+    </li>
+  );
+}
+
 function DatabaseNode({
   connId,
   name,
@@ -1321,6 +1384,16 @@ function DatabaseNode({
   // A pattern forces the db open so its object lists load and filter;
   // favorites-only renders a flat starred list instead of the groups.
   const forceOpen = matcher !== null;
+  // FK jumps / the palette can activate a data tab under a collapsed
+  // database; expand on selection change so the row can scroll into view.
+  // Runs only on flips, so manually collapsing a stuck-open db stays put.
+  const dbHasActiveTable = useTabsStore((s) => {
+    const ref = activeTableRef(s);
+    return ref !== null && ref.connId === connId && ref.db === name;
+  });
+  useEffect(() => {
+    if (dbHasActiveTable) setOpen(true);
+  }, [dbHasActiveTable]);
 
   // Favorites-only mode: flat starred entries under this db.
   const favEntries = useMemo(
@@ -1434,24 +1507,7 @@ function DatabaseNode({
             {favEntries.map((key) => {
               const entry = parseFavoriteKey(key);
               if (!entry) return null;
-              const openEntry = () => openDataTable(connId, entry.db, entry.table);
-              return (
-                <li key={key}>
-                  <TreeRow
-                    onToggle={openEntry}
-                    onDoubleClick={openEntry}
-                    menu={
-                      <>
-                        <ToggleFavoriteItem db={entry.db} table={entry.table} />
-                        <CopyNameItem name={entry.table} />
-                      </>
-                    }
-                  >
-                    <Table className="size-3.5 shrink-0 text-warning" />
-                    <span className="truncate">{entry.table}</span>
-                  </TreeRow>
-                </li>
-              );
+              return <FavoriteEntryRow key={key} connId={connId} entry={entry} />;
             })}
           </ul>
         )
@@ -1608,7 +1664,7 @@ function ConnectedTree({ connId }: { connId: number }) {
                 type="button"
                 aria-label={t("tree.filterClear")}
                 onClick={() => setPattern("")}
-                className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-accent"
+                className="absolute right-1 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:bg-accent"
               >
                 <X className="size-3" />
               </button>
