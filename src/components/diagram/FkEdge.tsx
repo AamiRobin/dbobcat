@@ -127,13 +127,13 @@ function FkEdgeImpl({
       {showBadges && !dimmed && (
         <EdgeLabelRenderer>
           <span
-            className="nodrag nopan pointer-events-none absolute z-10 min-w-[1.1rem] rounded border border-border/80 bg-background/95 px-1 py-0.5 text-center font-mono text-[10px] font-semibold leading-none text-foreground shadow-sm"
+            className="nodrag nopan pointer-events-none absolute z-10 min-w-[1.1rem] rounded-sm border border-border/80 bg-background/95 px-1 py-0.5 text-center font-mono text-[10px] font-semibold leading-none text-foreground shadow-sm"
             style={{ transform: `translate(-50%,-50%) translate(${sourceBadge.x}px,${sourceBadge.y}px)` }}
           >
             N
           </span>
           <span
-            className="nodrag nopan pointer-events-none absolute z-10 min-w-[1.1rem] rounded border border-border/80 bg-background/95 px-1 py-0.5 text-center font-mono text-[10px] font-semibold leading-none text-foreground shadow-sm"
+            className="nodrag nopan pointer-events-none absolute z-10 min-w-[1.1rem] rounded-sm border border-border/80 bg-background/95 px-1 py-0.5 text-center font-mono text-[10px] font-semibold leading-none text-foreground shadow-sm"
             style={{ transform: `translate(-50%,-50%) translate(${targetBadge.x}px,${targetBadge.y}px)` }}
           >
             1

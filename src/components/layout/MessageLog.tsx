@@ -50,7 +50,7 @@ export function MessageLog() {
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+          className="flex items-center gap-1.5 rounded-sm px-1 py-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
         >
           {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
           <Terminal className="size-3.5" />

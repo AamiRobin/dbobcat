@@ -719,7 +719,7 @@ function FilterCell({
           }
         }}
         className={cn(
-          "h-5 w-full min-w-0 rounded-sm border border-transparent bg-transparent px-1 text-[11px] outline-none transition-colors",
+          "h-5 w-full min-w-0 rounded-md border border-transparent bg-transparent px-1 text-[11px] outline-none transition-colors",
           "placeholder:text-muted-foreground/50",
           "hover:border-input/60 hover:bg-accent/30",
           "focus-visible:border-ring focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring/40 dark:focus-visible:bg-input/30",

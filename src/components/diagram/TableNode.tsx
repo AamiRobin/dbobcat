@@ -138,7 +138,7 @@ function TableNodeImpl({ id, data, selected }: NodeProps<TableFlowNode>) {
         <button
           type="button"
           aria-label={`hide ${id}`}
-          className="rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100"
+          className="rounded-sm p-0.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100"
           onClick={(e) => {
             e.stopPropagation();
             onHideNode(id);

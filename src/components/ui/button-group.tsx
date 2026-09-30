@@ -15,7 +15,7 @@ const buttonGroupVariants = cva(
       // Upstream shadcn "attached" styling glues buttons edge-to-edge with
       // square inner corners. Off by default: this app's clusters are
       // detached pills — a bordered, padded container whose inset buttons
-      // keep their own radii (see in-data rounded-sm in button.tsx).
+      // keep their own radius (all buttons are rounded-md; see button.tsx).
       attached: {
         true: "[&>*:not(:first-child)]:rounded-l-none [&>*:not(:first-child)]:border-l-0 [&>*:not(:last-child)]:rounded-r-none",
         false: "",

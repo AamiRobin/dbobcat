@@ -126,12 +126,12 @@ export function IndexesTab({
               {ix.columns.map((colName, ci) => (
                 <li key={colName} className="flex items-center gap-1">
                   <span className="w-5 text-right text-[10px] tabular-nums text-muted-foreground">{ci + 1}</span>
-                  <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-xs">{colName}</span>
+                  <span className="rounded-sm bg-secondary px-1.5 py-0.5 font-mono text-xs">{colName}</span>
                   <button
                     type="button"
                     onClick={() => moveColumn(i, ci, -1)}
                     disabled={ci === 0}
-                    className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+                    className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
                     aria-label={`Move ${colName} up`}
                   >
                     <ArrowUp className="size-3" />
@@ -140,7 +140,7 @@ export function IndexesTab({
                     type="button"
                     onClick={() => moveColumn(i, ci, 1)}
                     disabled={ci === ix.columns.length - 1}
-                    className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+                    className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
                     aria-label={`Move ${colName} down`}
                   >
                     <ArrowDown className="size-3" />
@@ -148,7 +148,7 @@ export function IndexesTab({
                   <button
                     type="button"
                     onClick={() => update(i, { columns: ix.columns.filter((c) => c !== colName) })}
-                    className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-destructive"
+                    className="ml-auto rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-destructive"
                     aria-label={`Remove ${colName}`}
                   >
                     <X className="size-3" />

@@ -651,7 +651,7 @@ function ExportDialogInner({
                     />
                   </div>
                   {dump.extendedInserts && (
-                    <div className="flex flex-nowrap items-center gap-x-4 rounded bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground">
+                    <div className="flex flex-nowrap items-center gap-x-4 rounded-sm bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground">
                       <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
                         Max INSERT size (KB)
                         <Input

@@ -718,7 +718,7 @@ function DiagramViewInner({ tabId, connId, db }: { tabId: string; connId: number
         {dia.hidden.length > 0 && (
           <button
             type="button"
-            className="rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
+            className="rounded-sm px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
             onClick={() => patch(tabId, { hidden: [] })}
           >
             {t("er.status.hidden", { count: dia.hidden.length })}

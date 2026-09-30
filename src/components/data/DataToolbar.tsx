@@ -460,7 +460,7 @@ function ColumnsMenu({
                   onToggle(col.name, hidden.has(col.name));
                 }
               }}
-              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-accent"
+              className="flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-xs hover:bg-accent"
             >
               {/* Visual only — the row handles clicks so they never double-fire. */}
               <Checkbox

@@ -209,7 +209,7 @@ function ColumnsHelper({
                   setChecked(new Set());
                 }}
                 className={cn(
-                  "w-full truncate rounded px-1.5 py-0.5 text-left font-mono text-xs",
+                  "w-full truncate rounded-sm px-1.5 py-0.5 text-left font-mono text-xs",
                   table === name ? "bg-accent text-accent-foreground" : "hover:bg-accent",
                 )}
               >
@@ -230,7 +230,7 @@ function ColumnsHelper({
           <ul className="p-1">
             {(columns.data ?? []).map((col) => (
               <li key={col.name}>
-                <label className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs hover:bg-accent">
+                <label className="flex w-full items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-xs hover:bg-accent">
                   <Checkbox
                     checked={checked.has(col.name)}
                     onCheckedChange={(v) => toggleColumn(col.name, v === true)}
@@ -349,7 +349,7 @@ function SnippetsHelper({
             {snippets.map((snippet) => (
               <li
                 key={snippet.id}
-                className="group flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent"
+                className="group flex items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-accent"
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium">{snippet.name}</span>
@@ -488,7 +488,7 @@ function ReferenceHelper({ insertText }: { insertText: (text: string) => void })
                       <button
                         type="button"
                         onClick={() => insertText(`${fn.name}(`)}
-                        className="w-full truncate rounded px-1 py-0.5 text-left font-mono text-xs hover:bg-accent"
+                        className="w-full truncate rounded-sm px-1 py-0.5 text-left font-mono text-xs hover:bg-accent"
                       >
                         {fn.signature}
                       </button>
@@ -513,7 +513,7 @@ function ReferenceHelper({ insertText }: { insertText: (text: string) => void })
                 key={kw}
                 type="button"
                 onClick={() => insertText(kw)}
-                className="rounded border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] hover:bg-accent"
+                className="rounded-sm border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] hover:bg-accent"
               >
                 {kw}
               </button>

@@ -665,7 +665,7 @@ export function AiBar({
               {session.pending?.db ?? db ?? "?"} @ #
               {session.pending?.connId ?? connId ?? "?"}
             </span>
-            <pre className="mt-1.5 max-h-32 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px]">
+            <pre className="mt-1.5 max-h-32 overflow-auto rounded-sm bg-muted/50 p-2 font-mono text-[11px]">
               {session.pending?.sql ?? ""}
             </pre>
           </>

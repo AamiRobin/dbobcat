@@ -217,7 +217,7 @@ function ColumnRow({
             type="button"
             onClick={() => onMove(index, -1)}
             disabled={index === 0}
-            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+            className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
             aria-label="Move up"
           >
             <ArrowUp className="size-3" />
@@ -226,7 +226,7 @@ function ColumnRow({
             type="button"
             onClick={() => onMove(index, 1)}
             disabled={index === rowCount - 1}
-            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+            className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
             aria-label="Move down"
           >
             <ArrowDown className="size-3" />
@@ -234,7 +234,7 @@ function ColumnRow({
           <button
             type="button"
             onClick={onRemove}
-            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-destructive"
+            className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-destructive"
             aria-label="Delete column"
           >
             <Trash2 className="size-3" />

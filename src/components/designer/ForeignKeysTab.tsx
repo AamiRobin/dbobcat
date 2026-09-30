@@ -63,7 +63,7 @@ export function ForeignKeysTab({
             {fk.columns.map((colName) => (
               <span
                 key={colName}
-                className="flex items-center gap-0.5 rounded bg-secondary px-1.5 py-0.5 font-mono text-xs"
+                className="flex items-center gap-0.5 rounded-sm bg-secondary px-1.5 py-0.5 font-mono text-xs"
               >
                 {colName}
                 <button
