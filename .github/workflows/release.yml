@@ -140,6 +140,11 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: dbobcat-${{ matrix.os }}-${{ matrix.target }}
+          # Artifacts are only intermediates for the publish job (bundles land
+          # in the release). Default 90-day retention accumulates ~2 GB and
+          # exhausts the account-wide 500 MB artifact quota (shared with
+          # subvoce nightlies), so keep ~2 runs live.
+          retention-days: 2
           # Final artifacts only: bundle/ also holds AppImage/deb *staging
           # trees*, and uploading bundle/** wholesale once flooded the
           # release with ~250 extracted .so/gschema files.
